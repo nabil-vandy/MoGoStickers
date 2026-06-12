@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Local generated data
+output/*.csv
+screenshots/processed_screenshots.json
+
+# Local screenshot inputs
+screenshots/*.png
+screenshots/*.jpg
+screenshots/*.jpeg
+screenshots/*.PNG
+screenshots/*.JPG
+screenshots/*.JPEG
+screenshots/**/*.png
+screenshots/**/*.jpg
+screenshots/**/*.jpeg
+screenshots/**/*.PNG
+screenshots/**/*.JPG
+screenshots/**/*.JPEG

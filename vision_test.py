@@ -1,0 +1,327 @@
+"""Process user screenshot folders and update the sticker database CSV."""
+
+from pathlib import Path
+import gc
+import hashlib
+import json
+import mimetypes
+import os
+import time
+
+import pandas as pd
+
+
+SCREENSHOTS_DIR = Path("screenshots")
+OUTPUT_DIR = Path("output")
+DATABASE_NAME = "sticker_database.csv"
+DATABASE_PATH = OUTPUT_DIR / DATABASE_NAME
+PROCESSED_LOG = SCREENSHOTS_DIR / "processed_screenshots.json"
+
+USERS = ["Jon", "Hana", "Nabil"]
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+MAX_ATTEMPTS = 3
+IMAGE_CHUNK_SIZE = 15
+CHUNK_PAUSE_SECONDS = 65
+
+
+def find_database_path():
+    if DATABASE_PATH.exists():
+        return DATABASE_PATH
+    raise FileNotFoundError(
+        "Could not find sticker_database.csv in output/. "
+        "Run makeDatabase.py first."
+    )
+
+
+def load_processed_log():
+    if not PROCESSED_LOG.exists():
+        return {}
+
+    with PROCESSED_LOG.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def save_processed_log(processed):
+    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    with PROCESSED_LOG.open("w", encoding="utf-8") as file:
+        json.dump(processed, file, indent=2, sort_keys=True)
+
+
+def file_hash(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def safe_parse_json(text):
+    text = text.strip().replace("```json", "").replace("```", "")
+
+    start = text.find("{")
+    end = text.rfind("}") + 1
+
+    if start == -1 or end == 0:
+        raise ValueError(f"No JSON object found in Gemini response: {text}")
+
+    return json.loads(text[start:end])
+
+
+def extract_stickers_from_image(client, image_path):
+    mime_type = mimetypes.guess_type(image_path.name)[0] or "image/png"
+
+    with image_path.open("rb") as file:
+        image_bytes = file.read()
+
+    prompt = """
+Return ONLY valid JSON. Do not include markdown or explanation.
+
+Extract the Monopoly GO stickers visible in this screenshot.
+
+Use this exact JSON shape:
+{
+  "set_name": "",
+  "set_number": "",
+  "stickers": [
+    {
+      "name": "",
+      "count": 0
+    }
+  ]
+}
+
+Rules:
+- Include only stickers the user owns or has copies of in the image.
+- "count" should be the total number shown for that sticker in the image.
+- If the image shows a duplicate count such as +1, return 2 total.
+- Keep sticker names exactly as they appear when possible.
+"""
+
+    try:
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=[
+                        {
+                            "role": "user",
+                            "parts": [
+                                {"text": prompt},
+                                {
+                                    "inline_data": {
+                                        "mime_type": mime_type,
+                                        "data": image_bytes,
+                                    }
+                                },
+                            ],
+                        }
+                    ],
+                )
+                return safe_parse_json(response.text)
+            except Exception as error:
+                if "429" in str(error) and attempt < MAX_ATTEMPTS:
+                    print(f"Quota hit. Waiting {CHUNK_PAUSE_SECONDS}s before retrying...")
+                    time.sleep(CHUNK_PAUSE_SECONDS)
+                    continue
+                raise
+    finally:
+        del image_bytes
+
+
+def normalize_name(value):
+    return str(value).strip().casefold()
+
+
+def update_database(df, user, extracted_data):
+    if user not in df.columns:
+        df[user] = 0
+
+    updated = 0
+    missing = []
+
+    for sticker in extracted_data.get("stickers", []):
+        sticker_name = str(sticker.get("name", "")).strip()
+        if not sticker_name:
+            continue
+
+        try:
+            count = int(sticker.get("count", 0))
+        except (TypeError, ValueError):
+            count = 0
+
+        mask = df["Sticker_Name"].map(normalize_name) == normalize_name(sticker_name)
+
+        if mask.any():
+            df.loc[mask, user] = count
+            updated += int(mask.sum())
+        else:
+            missing.append(sticker_name)
+
+    return updated, missing
+
+
+def find_zero_regressions(previous_df, updated_df, users):
+    regressions = []
+
+    for user in users:
+        if user not in updated_df.columns:
+            continue
+
+        if user in previous_df.columns:
+            previous_values = previous_df[user]
+        else:
+            previous_values = pd.Series(0, index=updated_df.index)
+
+        previous_counts = pd.to_numeric(previous_values, errors="coerce")
+        previous_counts = previous_counts.reindex(updated_df.index, fill_value=0).fillna(0)
+        updated_counts = pd.to_numeric(updated_df[user], errors="coerce").fillna(0)
+
+        regressed_rows = (previous_counts > 0) & (updated_counts == 0)
+
+        for index in updated_df.index[regressed_rows]:
+            regressions.append(
+                {
+                    "user": user,
+                    "sticker": str(updated_df.loc[index, "Sticker_Name"]),
+                    "previous": int(previous_counts.loc[index]),
+                    "updated": int(updated_counts.loc[index]),
+                }
+            )
+
+    return regressions
+
+
+def validate_no_zero_regressions(previous_df, updated_df, users):
+    regressions = find_zero_regressions(previous_df, updated_df, users)
+    if not regressions:
+        return
+
+    details = "; ".join(
+        (
+            f"{regression['user']} / {regression['sticker']}: "
+            f"{regression['previous']} -> {regression['updated']}"
+        )
+        for regression in regressions
+    )
+    raise ValueError(
+        "Sticker count validation failed: owned stickers cannot drop to 0. "
+        f"{details}"
+    )
+
+
+def image_files_for_user(user):
+    user_dir = SCREENSHOTS_DIR / user
+    if not user_dir.exists():
+        print(f"Skipping {user}: missing folder {user_dir}")
+        return []
+
+    return sorted(
+        path
+        for path in user_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+
+def chunked(items, size):
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+def pending_images(processed):
+    images = []
+
+    for user in USERS:
+        for image_path in image_files_for_user(user):
+            image_key = f"{user}/{image_path.name}"
+            current_hash = file_hash(image_path)
+
+            if processed.get(image_key, {}).get("sha256") == current_hash:
+                print(f"Skipping already processed image: {image_key}")
+                continue
+
+            images.append(
+                {
+                    "user": user,
+                    "path": image_path,
+                    "key": image_key,
+                    "sha256": current_hash,
+                }
+            )
+
+    return images
+
+
+def main():
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not set in your environment variables.")
+
+    database_path = find_database_path()
+    df = pd.read_csv(database_path)
+
+    for user in USERS:
+        if user not in df.columns:
+            df[user] = 0
+    previous_df = df.copy(deep=True)
+
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    processed = load_processed_log()
+    images_to_process = pending_images(processed)
+
+    for chunk_number, image_chunk in enumerate(
+        chunked(images_to_process, IMAGE_CHUNK_SIZE),
+        start=1,
+    ):
+        print(
+            f"Processing image chunk {chunk_number} "
+            f"({len(image_chunk)} image(s), max {IMAGE_CHUNK_SIZE} per minute)"
+        )
+
+        for image in image_chunk:
+            user = image["user"]
+            image_path = image["path"]
+            image_key = image["key"]
+
+            print(f"Processing {image_key} with {MODEL_NAME}")
+            extracted_data = extract_stickers_from_image(client, image_path)
+            updated, missing = update_database(df, user, extracted_data)
+
+            processed[image_key] = {
+                "sha256": image["sha256"],
+                "model": MODEL_NAME,
+                "set_name": extracted_data.get("set_name", ""),
+                "set_number": extracted_data.get("set_number", ""),
+                "updated_rows": updated,
+                "missing_stickers": missing,
+            }
+
+            print(f"Updated {updated} database row(s) for {user}.")
+            if missing:
+                print(f"Could not match: {', '.join(missing)}")
+
+            del extracted_data
+
+        gc.collect()
+
+        if chunk_number * IMAGE_CHUNK_SIZE < len(images_to_process):
+            print(
+                f"Finished {IMAGE_CHUNK_SIZE} Gemini prompt(s). "
+                f"Waiting {CHUNK_PAUSE_SECONDS}s before the next chunk..."
+            )
+            time.sleep(CHUNK_PAUSE_SECONDS)
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    validate_no_zero_regressions(previous_df, df, USERS)
+    df.to_csv(DATABASE_PATH, index=False)
+    save_processed_log(processed)
+
+    print(f"Saved updated database to {DATABASE_PATH}")
+    print(f"Saved processed image log to {PROCESSED_LOG}")
+
+
+if __name__ == "__main__":
+    main()
