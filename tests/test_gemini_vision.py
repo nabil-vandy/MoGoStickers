@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pandas as pd
 
-import vision_test
+import gemini_vision
 
 
-class VisionTestHelpers(unittest.TestCase):
+class GeminiVisionTestHelpers(unittest.TestCase):
     def test_safe_parse_json_accepts_code_fences(self):
-        parsed = vision_test.safe_parse_json(
+        parsed = gemini_vision.safe_parse_json(
             '```json\n{"set_name":"Test","stickers":[]}\n```'
         )
 
@@ -31,7 +31,7 @@ class VisionTestHelpers(unittest.TestCase):
             ]
         }
 
-        updated, missing = vision_test.update_database(df, "Hana", extracted)
+        updated, missing = gemini_vision.update_database(df, "Hana", extracted)
 
         self.assertEqual(updated, 1)
         self.assertEqual(missing, ["Lisa"])
@@ -43,7 +43,7 @@ class VisionTestHelpers(unittest.TestCase):
         updated = pd.DataFrame([{"Sticker_Name": "Marge", "Hana": 0}])
 
         with self.assertRaises(ValueError) as context:
-            vision_test.validate_no_zero_regressions(previous, updated, ["Hana"])
+            gemini_vision.validate_no_zero_regressions(previous, updated, ["Hana"])
 
         self.assertIn("owned stickers cannot drop to 0", str(context.exception))
         self.assertIn("Hana / Marge: 1 -> 0", str(context.exception))
@@ -52,7 +52,7 @@ class VisionTestHelpers(unittest.TestCase):
         previous = pd.DataFrame([{"Sticker_Name": "Marge", "Hana": 3}])
         updated = pd.DataFrame([{"Sticker_Name": "Marge", "Hana": 1}])
 
-        regressions = vision_test.find_zero_regressions(previous, updated, ["Hana"])
+        regressions = gemini_vision.find_zero_regressions(previous, updated, ["Hana"])
 
         self.assertEqual(regressions, [])
 
@@ -60,7 +60,7 @@ class VisionTestHelpers(unittest.TestCase):
         previous = pd.DataFrame([{"Sticker_Name": "Marge", "Hana": 0}])
         updated = pd.DataFrame([{"Sticker_Name": "Marge", "Hana": 0}])
 
-        regressions = vision_test.find_zero_regressions(previous, updated, ["Hana"])
+        regressions = gemini_vision.find_zero_regressions(previous, updated, ["Hana"])
 
         self.assertEqual(regressions, [])
 
@@ -79,7 +79,7 @@ class VisionTestHelpers(unittest.TestCase):
         )
 
         with self.assertRaises(ValueError) as context:
-            vision_test.validate_no_zero_regressions(previous, updated, ["Hana", "Jon"])
+            gemini_vision.validate_no_zero_regressions(previous, updated, ["Hana", "Jon"])
 
         message = str(context.exception)
         self.assertIn("Hana / Marge: 1 -> 0", message)
@@ -90,10 +90,10 @@ class VisionTestHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "sample.txt"
             path.write_text("first", encoding="utf-8")
-            first_hash = vision_test.file_hash(path)
+            first_hash = gemini_vision.file_hash(path)
 
             path.write_text("second", encoding="utf-8")
-            second_hash = vision_test.file_hash(path)
+            second_hash = gemini_vision.file_hash(path)
 
         self.assertNotEqual(first_hash, second_hash)
 
@@ -112,7 +112,7 @@ class VisionTestHelpers(unittest.TestCase):
         self.assertIsInstance(json.dumps(processed), str)
 
     def test_chunked_splits_into_requested_sizes(self):
-        chunks = list(vision_test.chunked(list(range(32)), 15))
+        chunks = list(gemini_vision.chunked(list(range(32)), 15))
 
         self.assertEqual([len(chunk) for chunk in chunks], [15, 15, 2])
         self.assertEqual(chunks[0][0], 0)
@@ -129,22 +129,22 @@ class VisionTestHelpers(unittest.TestCase):
             first.write_bytes(b"already done")
             second.write_bytes(b"new image")
 
-            old_screenshots_dir = vision_test.SCREENSHOTS_DIR
-            old_users = vision_test.USERS
+            old_screenshots_dir = gemini_vision.SCREENSHOTS_DIR
+            old_users = gemini_vision.USERS
 
             try:
-                vision_test.SCREENSHOTS_DIR = screenshot_dir
-                vision_test.USERS = ["Jon"]
+                gemini_vision.SCREENSHOTS_DIR = screenshot_dir
+                gemini_vision.USERS = ["Jon"]
                 processed = {
                     f"Jon/{first.name}": {
-                        "sha256": vision_test.file_hash(first),
+                        "sha256": gemini_vision.file_hash(first),
                     }
                 }
 
-                pending = vision_test.pending_images(processed)
+                pending = gemini_vision.pending_images(processed)
             finally:
-                vision_test.SCREENSHOTS_DIR = old_screenshots_dir
-                vision_test.USERS = old_users
+                gemini_vision.SCREENSHOTS_DIR = old_screenshots_dir
+                gemini_vision.USERS = old_users
 
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0]["key"], "Jon/second.jpeg")

@@ -1,10 +1,20 @@
 """Find sticker sharing opportunities from the local sticker database."""
 
 import csv
+import os
 from pathlib import Path
 
+DATABASE_NAME = "sticker_database.csv"
+DATABASE_PATH_ENV = os.getenv("DATABASE_PATH")
+if DATABASE_PATH_ENV:
+    DATABASE_PATH = Path(DATABASE_PATH_ENV)
+else:
+    GDRIVE_DB_PATH = Path("/content/drive/MyDrive/1. Personal Projects/MoGoTracker/output") / DATABASE_NAME
+    if GDRIVE_DB_PATH.exists():
+        DATABASE_PATH = GDRIVE_DB_PATH
+    else:
+        DATABASE_PATH = Path("output") / DATABASE_NAME
 
-DATABASE_PATH = Path("output") / "sticker_database.csv"
 USERS = ["Hana", "Jon", "Nabil"]
 NO_TRADES_MESSAGE = "No sticker trades available."
 
@@ -32,7 +42,7 @@ def star_number(row):
 def load_database(path=DATABASE_PATH):
     if not path.exists():
         raise FileNotFoundError(
-            f"Could not find {path}. Run makeDatabase.py and vision_test.py first."
+            f"Could not find {path}. Run makeDatabase.py and gemini_vision.py first."
         )
 
     with path.open(newline="", encoding="utf-8") as file:
@@ -55,19 +65,19 @@ def find_trade_rows(rows, users=USERS):
         recipients = [user for user, count in counts.items() if count == 0]
 
         for sender in senders:
-            for recipient in recipients:
-                if sender != recipient:
-                    trades.append(
-                        {
-                            "sender": sender,
-                            "set_name": set_name,
-                            "sticker_name": sticker_name,
-                            "recipient": recipient,
-                            "stars": stars,
-                            "gold": gold,
-                            "row_index": row_index,
-                        }
-                    )
+            available = counts[sender] - 1
+            for recipient in recipients[:available]:
+                trades.append(
+                    {
+                        "sender": sender,
+                        "set_name": set_name,
+                        "sticker_name": sticker_name,
+                        "recipient": recipient,
+                        "stars": stars,
+                        "gold": gold,
+                        "row_index": row_index,
+                    }
+                )
 
     return sorted(
         trades,

@@ -7,7 +7,7 @@ This repo tracks Monopoly GO sticker ownership for three users: `Hana`, `Jon`, a
 ## Important Files
 
 - `makeDatabase.py`: pulls the Google Sheet into `output/sticker_database.csv`.
-- `vision_test.py`: processes screenshot folders and updates user counts.
+- `gemini_vision.py`: processes screenshot folders and updates user counts.
 - `output/sticker_database.csv`: working CSV database.
 - `screenshots/processed_screenshots.json`: local history used to skip screenshots already processed.
 - `tests/`: offline tests. These should never call Gemini.
@@ -17,7 +17,7 @@ This repo tracks Monopoly GO sticker ownership for three users: `Hana`, `Jon`, a
 Use these commands before and after edits:
 
 ```bash
-python -B -c 'source = open("vision_test.py").read(); compile(source, "vision_test.py", "exec")'
+python -B -c 'source = open("gemini_vision.py").read(); compile(source, "gemini_vision.py", "exec")'
 python -B -c 'source = open("makeDatabase.py").read(); compile(source, "makeDatabase.py", "exec")'
 python -m unittest discover -s tests
 ```
@@ -33,10 +33,10 @@ Run the app only when the user asks or when explicitly verifying runtime behavio
 
 ```bash
 python makeDatabase.py
-python vision_test.py
+python gemini_vision.py
 ```
 
-`vision_test.py` requires `GEMINI_API_KEY` and may spend Gemini quota. Prefer offline tests for normal code changes.
+`gemini_vision.py` requires `GEMINI_API_KEY` and may spend Gemini quota. Prefer offline tests for normal code changes.
 
 ## Coding Notes
 
@@ -50,5 +50,55 @@ python vision_test.py
 ## Efficient Task Boundaries
 
 - Database import tasks should usually touch only `makeDatabase.py`, `README.md`, and tests if needed.
-- Screenshot/Gemini tasks should usually touch only `vision_test.py`, `README.md`, and tests.
+- Screenshot/Gemini tasks should usually touch only `gemini_vision.py`, `README.md`, and tests.
 - Environment or onboarding tasks should usually touch only `README.md`, `AGENTS.md`, `.env.example`, `.gitignore`, `requirements.txt`, or `Makefile`.
+
+## Task Boundary Guides
+
+Use these task shapes to keep future Codex work focused and cheaper:
+
+### Update The Google Sheet Import
+* **Scope:**
+  * `makeDatabase.py`
+  * `tests/` only if logic changes
+  * `README.md` only if commands or paths change
+* **Avoid:**
+  * Running Gemini
+  * Editing screenshot processing code
+* **Check:**
+  ```bash
+  make syntax
+  make test
+  ```
+
+### Update Screenshot Processing
+* **Scope:**
+  * `gemini_vision.py`
+  * `tests/test_gemini_vision.py`
+  * `README.md` only if behavior changes
+  * `AGENTS.md` only if coding rules or invariants change
+* **Avoid:**
+  * Calling Gemini unless explicitly verifying live behavior
+  * Changing Google Sheet import code
+* **Check:**
+  ```bash
+  make syntax
+  make test
+  ```
+
+### Refresh The Database
+* **Scope:** Runtime only, no code edits unless the command fails because of code.
+* **Command:**
+  ```bash
+  make database
+  ```
+
+### Process New Screenshots
+* **Scope:** Runtime only, no code edits unless the command fails because of code.
+* **Requirements:**
+  * `GEMINI_API_KEY` must be set
+  * Images should be inside `screenshots/Hana`, `screenshots/Jon`, or `screenshots/Nabil`
+* **Command:**
+  ```bash
+  make process
+  ```

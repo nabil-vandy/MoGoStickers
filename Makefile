@@ -1,4 +1,4 @@
-PYTHON ?= python
+PYTHON ?= $(shell command -v python3 2>/dev/null || echo python)
 
 .PHONY: setup syntax test database process
 
@@ -7,7 +7,7 @@ setup:
 	$(PYTHON) -m pip install -r requirements.txt
 
 syntax:
-	$(PYTHON) -B -c 'source = open("vision_test.py").read(); compile(source, "vision_test.py", "exec")'
+	$(PYTHON) -B -c 'source = open("gemini_vision.py").read(); compile(source, "gemini_vision.py", "exec")'
 	$(PYTHON) -B -c 'source = open("makeDatabase.py").read(); compile(source, "makeDatabase.py", "exec")'
 
 test:
@@ -17,4 +17,4 @@ database:
 	$(PYTHON) makeDatabase.py
 
 process:
-	$(PYTHON) vision_test.py
+	$(PYTHON) gemini_vision.py

@@ -85,7 +85,6 @@ class TradeEngineTests(unittest.TestCase):
             trade_pairs,
             {
                 ("Hana", "Jon", "Lisa"),
-                ("Hana", "Nabil", "Lisa"),
                 ("Jon", "Hana", "Donut"),
                 ("Nabil", "Hana", "Donut"),
             },
@@ -97,7 +96,7 @@ class TradeEngineTests(unittest.TestCase):
                 "Set_Name": "Friends & Family",
                 "Sticker_Name": "Reverend Lovejoy",
                 "Star_Number": "1",
-                "Hana": "0",
+                "Hana": "1",
                 "Jon": "2",
                 "Nabil": "0",
             },
@@ -105,7 +104,7 @@ class TradeEngineTests(unittest.TestCase):
                 "Set_Name": "Friends & Family",
                 "Sticker_Name": "The Hibberts",
                 "Star_Number": "2",
-                "Hana": "0",
+                "Hana": "1",
                 "Jon": "2",
                 "Nabil": "0",
             },
@@ -164,7 +163,7 @@ class TradeEngineTests(unittest.TestCase):
         trades = tradeEngine.find_trade_rows(rows)
         trade_pairs = {(trade["sender"], trade["recipient"]) for trade in trades}
 
-        self.assertEqual(trade_pairs, {("Jon", "Hana"), ("Jon", "Nabil")})
+        self.assertEqual(trade_pairs, {("Jon", "Hana")})
 
     def test_format_trade_table_prints_no_trades_message(self):
         self.assertEqual(

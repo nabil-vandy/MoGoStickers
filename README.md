@@ -5,8 +5,8 @@ Local helper scripts for building and updating a Monopoly GO sticker tracker.
 ## What The Scripts Do
 
 - `makeDatabase.py` downloads the Google Sheet, keeps the first 7 columns, adds `Hana`, `Jon`, and `Nabil`, then saves `output/sticker_database.csv`.
-- `vision_test.py` reads screenshots from `screenshots/Jon`, `screenshots/Hana`, and `screenshots/Nabil`, sends only new screenshots to Gemini, updates each user's sticker counts in `output/sticker_database.csv`, and records processed images in `screenshots/processed_screenshots.json`.
-- `vision_test.py` validates the final counts before saving: once a user's sticker count is above zero, screenshot processing cannot save that sticker back to zero.
+- `gemini_vision.py` reads screenshots from `screenshots/Jon`, `screenshots/Hana`, and `screenshots/Nabil`, sends only new screenshots to Gemini, updates each user's sticker counts in `output/sticker_database.csv`, and records processed images in `screenshots/processed_screenshots.json`.
+- `gemini_vision.py` validates the final counts before saving: once a user's sticker count is above zero, screenshot processing cannot save that sticker back to zero.
 
 ## Setup
 
@@ -40,7 +40,7 @@ python makeDatabase.py
 Process screenshots and update counts:
 
 ```bash
-python vision_test.py
+python gemini_vision.py
 ```
 
 Find grouped sticker sharing opportunities:

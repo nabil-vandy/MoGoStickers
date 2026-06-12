@@ -9,13 +9,49 @@ import os
 import time
 
 import pandas as pd
+from google.genai import types
+from pydantic import BaseModel
 
 
-SCREENSHOTS_DIR = Path("screenshots")
+class StickerInfo(BaseModel):
+    name: str
+    count: int
+
+
+class SetInfo(BaseModel):
+    set_name: str
+    set_number: str
+    stickers: list[StickerInfo]
+
+
+SCREENSHOTS_DIR_ENV = os.getenv("SCREENSHOTS_DIR")
+if SCREENSHOTS_DIR_ENV:
+    SCREENSHOTS_DIR = Path(SCREENSHOTS_DIR_ENV)
+else:
+    GDRIVE_PATH = Path("/content/drive/MyDrive/1. Personal Projects/MoGoTracker/screenshots")
+    if GDRIVE_PATH.exists():
+        SCREENSHOTS_DIR = GDRIVE_PATH
+    else:
+        SCREENSHOTS_DIR = Path("screenshots")
+
 OUTPUT_DIR = Path("output")
 DATABASE_NAME = "sticker_database.csv"
-DATABASE_PATH = OUTPUT_DIR / DATABASE_NAME
-PROCESSED_LOG = SCREENSHOTS_DIR / "processed_screenshots.json"
+
+DATABASE_PATH_ENV = os.getenv("DATABASE_PATH")
+if DATABASE_PATH_ENV:
+    DATABASE_PATH = Path(DATABASE_PATH_ENV)
+else:
+    GDRIVE_DB_PATH = Path("/content/drive/MyDrive/1. Personal Projects/MoGoTracker/output") / DATABASE_NAME
+    if GDRIVE_DB_PATH.exists():
+        DATABASE_PATH = GDRIVE_DB_PATH
+    else:
+        DATABASE_PATH = OUTPUT_DIR / DATABASE_NAME
+
+PROCESSED_LOG_ENV = os.getenv("PROCESSED_LOG")
+if PROCESSED_LOG_ENV:
+    PROCESSED_LOG = Path(PROCESSED_LOG_ENV)
+else:
+    PROCESSED_LOG = SCREENSHOTS_DIR / "processed_screenshots.json"
 
 USERS = ["Jon", "Hana", "Nabil"]
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -30,7 +66,7 @@ def find_database_path():
     if DATABASE_PATH.exists():
         return DATABASE_PATH
     raise FileNotFoundError(
-        "Could not find sticker_database.csv in output/. "
+        f"Could not find {DATABASE_PATH.name} at {DATABASE_PATH}. "
         "Run makeDatabase.py first."
     )
 
@@ -44,17 +80,29 @@ def load_processed_log():
 
 
 def save_processed_log(processed):
-    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    PROCESSED_LOG.parent.mkdir(parents=True, exist_ok=True)
     with PROCESSED_LOG.open("w", encoding="utf-8") as file:
         json.dump(processed, file, indent=2, sort_keys=True)
 
 
 def file_hash(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    try:
+        from PIL import Image
+        with Image.open(path) as img:
+            width, height = img.size
+            top = int(height * 0.20)
+            bottom = int(height * (1.0 - 0.12))
+            cropped = img.crop((0, top, width, bottom))
+            
+            digest = hashlib.sha256()
+            digest.update(cropped.tobytes())
+            return digest.hexdigest()
+    except Exception:
+        digest = hashlib.sha256()
+        with path.open("rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
 
 def safe_parse_json(text):
@@ -76,21 +124,7 @@ def extract_stickers_from_image(client, image_path):
         image_bytes = file.read()
 
     prompt = """
-Return ONLY valid JSON. Do not include markdown or explanation.
-
 Extract the Monopoly GO stickers visible in this screenshot.
-
-Use this exact JSON shape:
-{
-  "set_name": "",
-  "set_number": "",
-  "stickers": [
-    {
-      "name": "",
-      "count": 0
-    }
-  ]
-}
 
 Rules:
 - Include only stickers the user owns or has copies of in the image.
@@ -118,8 +152,12 @@ Rules:
                             ],
                         }
                     ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=SetInfo,
+                    ),
                 )
-                return safe_parse_json(response.text)
+                return json.loads(response.text)
             except Exception as error:
                 if "429" in str(error) and attempt < MAX_ATTEMPTS:
                     print(f"Quota hit. Waiting {CHUNK_PAUSE_SECONDS}s before retrying...")
@@ -286,9 +324,21 @@ def main():
             image_path = image["path"]
             image_key = image["key"]
 
+            image_backup_df = df.copy(deep=True)
+
             print(f"Processing {image_key} with {MODEL_NAME}")
             extracted_data = extract_stickers_from_image(client, image_path)
             updated, missing = update_database(df, user, extracted_data)
+
+            # Check if this update introduced a regression against baseline
+            regressions = find_zero_regressions(previous_df, df, USERS)
+            if regressions:
+                print(f"Validation failed for image {image_key}. Rolling back changes for this image and saving progress.")
+                df = image_backup_df
+                OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                df.to_csv(DATABASE_PATH, index=False)
+                save_processed_log(processed)
+                validate_no_zero_regressions(previous_df, df, USERS)  # Will raise ValueError and halt
 
             processed[image_key] = {
                 "sha256": image["sha256"],
@@ -302,6 +352,11 @@ def main():
             print(f"Updated {updated} database row(s) for {user}.")
             if missing:
                 print(f"Could not match: {', '.join(missing)}")
+
+            # Save progress progressively to prevent losing work if standard exit or interruption happens
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            df.to_csv(DATABASE_PATH, index=False)
+            save_processed_log(processed)
 
             del extracted_data
 
