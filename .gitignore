@@ -21,3 +21,7 @@ screenshots/**/*.jpeg
 screenshots/**/*.PNG
 screenshots/**/*.JPG
 screenshots/**/*.JPEG
+
+# Google credentials JSON file
+google_creds.json
+

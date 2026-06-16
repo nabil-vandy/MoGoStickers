@@ -102,3 +102,10 @@ Use these task shapes to keep future Codex work focused and cheaper:
   ```bash
   make process
   ```
+
+## Communication Guidelines
+
+To help the user work effectively:
+- **Structure**: First, explain the problem or concept clearly. Then, provide clear, numbered steps on how to fix or set up the solution.
+- **Pacing**: Always wait for the user to complete those steps and confirm before moving forward to implementation or the next phase. Do not rush ahead or execute steps before the user has completed their part.
+

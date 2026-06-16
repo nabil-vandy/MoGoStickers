@@ -7,10 +7,16 @@ import json
 import mimetypes
 import os
 import time
+import io
+from urllib.parse import urlparse, parse_qs
 
 import pandas as pd
 from google.genai import types
 from pydantic import BaseModel
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
 
 
 class StickerInfo(BaseModel):
@@ -60,6 +66,54 @@ MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 MAX_ATTEMPTS = 3
 IMAGE_CHUNK_SIZE = 15
 CHUNK_PAUSE_SECONDS = 65
+
+EMAIL_TO_USER = {
+    "jonlucc@gmail.com": "Jon",
+    "salehn1@gmail.com": "Nabil",
+    "hana.m.priscu@gmail.com": "Hana",
+}
+
+
+def extract_drive_file_id(url):
+    url = url.strip()
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        if "open" in parsed.path or "file" in parsed.path:
+            queries = parse_qs(parsed.query)
+            if "id" in queries:
+                return queries["id"][0]
+        path_parts = parsed.path.split("/")
+        if "d" in path_parts:
+            d_idx = path_parts.index("d")
+            if d_idx + 1 < len(path_parts):
+                return path_parts[d_idx + 1]
+    except Exception:
+        pass
+    return None
+
+
+def download_drive_file(file_id):
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_creds.json")
+    if not os.path.exists(creds_path):
+        raise FileNotFoundError(f"Credentials file not found at {creds_path}")
+        
+    creds = service_account.Credentials.from_service_account_file(
+        creds_path,
+        scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    )
+    drive_service = build("drive", "v3", credentials=creds)
+    
+    request = drive_service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+        
+    return fh.getvalue()
+
 
 
 def find_database_path():
@@ -117,11 +171,14 @@ def safe_parse_json(text):
     return json.loads(text[start:end])
 
 
-def extract_stickers_from_image(client, image_path):
-    mime_type = mimetypes.guess_type(image_path.name)[0] or "image/png"
-
-    with image_path.open("rb") as file:
-        image_bytes = file.read()
+def extract_stickers_from_image(client, image_data):
+    if isinstance(image_data, bytes):
+        image_bytes = image_data
+        mime_type = "image/png"
+    else:
+        mime_type = mimetypes.guess_type(image_data.name)[0] or "image/png"
+        with image_data.open("rb") as file:
+            image_bytes = file.read()
 
     prompt = """
 Extract the Monopoly GO stickers visible in this screenshot.
@@ -166,6 +223,7 @@ Rules:
                 raise
     finally:
         del image_bytes
+
 
 
 def normalize_name(value):
@@ -267,7 +325,94 @@ def chunked(items, size):
         yield items[start : start + size]
 
 
-def pending_images(processed):
+def pending_images_from_google(processed):
+    sheet_id = os.getenv("INGEST_SHEET_ID", "1lRwalTc96V1-VkECfoh3xWOo4gcVY5qctMzH5Q0_aUY")
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_creds.json")
+    
+    if not os.path.exists(creds_path):
+        print(f"Credentials not found at {creds_path}. Cannot use direct pipeline.")
+        return []
+
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            creds_path,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets.readonly",
+                "https://www.googleapis.com/auth/drive.readonly"
+            ]
+        )
+        sheets_service = build("sheets", "v4", credentials=creds)
+        
+        result = sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range="A:Z"
+        ).execute()
+        
+        values = result.get("values", [])
+        if not values:
+            return []
+            
+        header = values[0]
+        timestamp_idx = -1
+        email_idx = -1
+        upload_indices = []
+        
+        for idx, col in enumerate(header):
+            col_lower = col.lower()
+            if "timestamp" in col_lower:
+                timestamp_idx = idx
+            elif "email" in col_lower:
+                email_idx = idx
+            elif "upload" in col_lower or "screenshot" in col_lower or "image" in col_lower:
+                upload_indices.append(idx)
+                
+        if timestamp_idx == -1 or email_idx == -1 or not upload_indices:
+            print("Could not find required columns in the ingestion sheet.")
+            return []
+            
+        images = []
+        for row in values[1:]:
+            if len(row) <= max(timestamp_idx, email_idx):
+                continue
+                
+            email = row[email_idx].strip().lower()
+            user = EMAIL_TO_USER.get(email)
+            if not user:
+                continue
+                
+            timestamp = row[timestamp_idx]
+            
+            urls = []
+            for idx in upload_indices:
+                if idx < len(row):
+                    cell_value = row[idx]
+                    if cell_value:
+                        parts = [p.strip() for p in cell_value.split(",")]
+                        urls.extend(parts)
+                        
+            for url in urls:
+                file_id = extract_drive_file_id(url)
+                if not file_id:
+                    continue
+                    
+                if file_id in processed:
+                    continue
+                    
+                images.append({
+                    "user": user,
+                    "file_id": file_id,
+                    "url": url,
+                    "timestamp": timestamp,
+                    "key": file_id
+                })
+                
+        return images
+    except Exception as e:
+        print(f"Error fetching pending images from Google Sheets: {e}")
+        return []
+
+
+def pending_images_from_local(processed):
     images = []
 
     for user in USERS:
@@ -289,6 +434,15 @@ def pending_images(processed):
             )
 
     return images
+
+
+def pending_images(processed):
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_creds.json")
+    if os.path.exists(creds_path):
+        return pending_images_from_google(processed)
+    else:
+        return pending_images_from_local(processed)
+
 
 
 def main():
@@ -321,13 +475,27 @@ def main():
 
         for image in image_chunk:
             user = image["user"]
-            image_path = image["path"]
             image_key = image["key"]
 
             image_backup_df = df.copy(deep=True)
 
             print(f"Processing {image_key} with {MODEL_NAME}")
-            extracted_data = extract_stickers_from_image(client, image_path)
+            
+            try:
+                if "file_id" in image:
+                    image_data = download_drive_file(image["file_id"])
+                    import hashlib
+                    current_hash = hashlib.sha256(image_data).hexdigest()
+                else:
+                    image_path = image["path"]
+                    with image_path.open("rb") as f:
+                        image_data = f.read()
+                    current_hash = file_hash(image_path)
+            except Exception as e:
+                print(f"Failed to download/load image {image_key}: {e}")
+                continue
+
+            extracted_data = extract_stickers_from_image(client, image_data)
             updated, missing = update_database(df, user, extracted_data)
 
             # Check if this update introduced a regression against baseline
@@ -341,13 +509,15 @@ def main():
                 validate_no_zero_regressions(previous_df, df, USERS)  # Will raise ValueError and halt
 
             processed[image_key] = {
-                "sha256": image["sha256"],
+                "sha256": current_hash,
                 "model": MODEL_NAME,
                 "set_name": extracted_data.get("set_name", ""),
                 "set_number": extracted_data.get("set_number", ""),
                 "updated_rows": updated,
                 "missing_stickers": missing,
             }
+            if "timestamp" in image:
+                processed[image_key]["timestamp"] = image["timestamp"]
 
             print(f"Updated {updated} database row(s) for {user}.")
             if missing:

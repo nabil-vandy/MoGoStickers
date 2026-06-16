@@ -1,4 +1,5 @@
-PYTHON ?= $(shell command -v python3 2>/dev/null || echo python)
+PYTHON ?= $(shell [ -f .venv/bin/python ] && echo .venv/bin/python || command -v python3 2>/dev/null || echo python)
+
 
 .PHONY: setup syntax test database process
 

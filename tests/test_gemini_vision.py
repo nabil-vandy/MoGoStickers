@@ -2,14 +2,27 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pandas as pd
 
 import gemini_vision
 
 
+
 class GeminiVisionTestHelpers(unittest.TestCase):
+    def setUp(self):
+        import os
+        self.orig_env = dict(os.environ)
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "nonexistent_file_for_tests.json"
+
+    def tearDown(self):
+        import os
+        os.environ.clear()
+        os.environ.update(self.orig_env)
+
     def test_safe_parse_json_accepts_code_fences(self):
+
         parsed = gemini_vision.safe_parse_json(
             '```json\n{"set_name":"Test","stickers":[]}\n```'
         )
@@ -149,6 +162,66 @@ class GeminiVisionTestHelpers(unittest.TestCase):
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0]["key"], "Jon/second.jpeg")
 
+    def test_extract_drive_file_id_various_formats(self):
+        # open?id=... format
+        self.assertEqual(
+            gemini_vision.extract_drive_file_id("https://drive.google.com/open?id=1spTE2jH5GB8qtdtQbJ80fuhEDP0oa2-y"),
+            "1spTE2jH5GB8qtdtQbJ80fuhEDP0oa2-y"
+        )
+        # file/d/.../view format
+        self.assertEqual(
+            gemini_vision.extract_drive_file_id("https://drive.google.com/file/d/1spTE2jH5GB8qtdtQbJ80fuhEDP0oa2-y/view?usp=drivesdk"),
+            "1spTE2jH5GB8qtdtQbJ80fuhEDP0oa2-y"
+        )
+        # Invalid url
+        self.assertIsNone(gemini_vision.extract_drive_file_id("https://google.com"))
+        self.assertIsNone(gemini_vision.extract_drive_file_id(""))
+
+    @patch("gemini_vision.build")
+    @patch("google.oauth2.service_account.Credentials.from_service_account_file")
+    @patch("os.path.exists")
+    def test_pending_images_from_google_success(self, mock_exists, mock_creds, mock_build):
+        # Force exists to return True for any check in this test
+        mock_exists.return_value = True
+
+        # Mock Sheets API client and responses
+
+        mock_service = MagicMock()
+        mock_build.return_value = mock_service
+
+        # Values returned from sheets.values().get().execute()
+        mock_values = [
+            ["Timestamp", "Email Address", "Select screenshots to upload (First 10)"],
+            ["6/16/2026 15:03:05", "salehn1@gmail.com", "https://drive.google.com/open?id=1spTE2jH5GB8qtdtQbJ80fuhEDP0oa2-y, https://drive.google.com/open?id=1HN6S1D4oKFnFXmh3Yeg-2ETDSSAnGNVg"],
+            ["6/16/2026 15:04:00", "jonlucc@gmail.com", "https://drive.google.com/open?id=1Zxvwj4v9LZUU-VJbtMXQ3mh3o1hdSsyT"],
+            ["6/16/2026 15:05:00", "unknown@gmail.com", "https://drive.google.com/open?id=invalid"]
+        ]
+
+        mock_service.spreadsheets().values().get().execute.return_value = {"values": mock_values}
+
+        # If the first file is already processed
+        processed = {
+            "1spTE2jH5GB8qtdtQbJ80fuhEDP0oa2-y": {"sha256": "somehash"}
+        }
+
+        # Call pending_images - because mock_exists says credentials exist, this will invoke pending_images_from_google
+        pending = gemini_vision.pending_images(processed)
+
+        # We expect:
+        # 1. 1spTE2jH5GB8qtdtQbJ80fuhEDP0oa2-y is skipped because it is in processed.
+        # 2. 1HN6S1D4oKFnFXmh3Yeg-2ETDSSAnGNVg from salehn1@gmail.com (Nabil) is returned.
+        # 3. 1Zxvwj4v9LZUU-VJbtMXQ3mh3o1hdSsyT from jonlucc@gmail.com (Jon) is returned.
+        # 4. unknown@gmail.com is skipped since it is not in EMAIL_TO_USER.
+
+        self.assertEqual(len(pending), 2)
+        self.assertEqual(pending[0]["user"], "Nabil")
+        self.assertEqual(pending[0]["file_id"], "1HN6S1D4oKFnFXmh3Yeg-2ETDSSAnGNVg")
+        self.assertEqual(pending[0]["timestamp"], "6/16/2026 15:03:05")
+
+        self.assertEqual(pending[1]["user"], "Jon")
+        self.assertEqual(pending[1]["file_id"], "1Zxvwj4v9LZUU-VJbtMXQ3mh3o1hdSsyT")
+
 
 if __name__ == "__main__":
     unittest.main()
+
