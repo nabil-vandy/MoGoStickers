@@ -216,11 +216,13 @@ Rules:
                 )
                 return json.loads(response.text)
             except Exception as error:
-                if "429" in str(error) and attempt < MAX_ATTEMPTS:
-                    print(f"Quota hit. Waiting {CHUNK_PAUSE_SECONDS}s before retrying...")
+                error_str = str(error)
+                if ("429" in error_str or "503" in error_str) and attempt < MAX_ATTEMPTS:
+                    print(f"Gemini API returned transient error (Rate limit / High demand). Waiting {CHUNK_PAUSE_SECONDS}s before retrying (Attempt {attempt} of {MAX_ATTEMPTS})...")
                     time.sleep(CHUNK_PAUSE_SECONDS)
                     continue
                 raise
+
     finally:
         del image_bytes
 
