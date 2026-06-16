@@ -1,7 +1,7 @@
 PYTHON ?= $(shell [ -f .venv/bin/python ] && echo .venv/bin/python || command -v python3 2>/dev/null || echo python)
 
 
-.PHONY: setup syntax test database process
+.PHONY: setup syntax test database process trade
 
 setup:
 	$(PYTHON) -m pip install --upgrade pip
@@ -19,3 +19,7 @@ database:
 
 process:
 	$(PYTHON) gemini_vision.py
+
+trade:
+	$(PYTHON) tradeEngine.py
+

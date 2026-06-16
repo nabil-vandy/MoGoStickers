@@ -46,7 +46,7 @@ All execution commands automatically detect and run inside the virtual environme
 3. **Find grouped sticker sharing opportunities**:
    * Check matches directly in the terminal:
      ```bash
-     .venv/bin/python tradeEngine.py
+     make trade
      ```
    * Or run the orchestrated pipeline (updates database, checks matches, and sends email alerts):
      ```bash
