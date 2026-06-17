@@ -10,6 +10,7 @@ setup:
 syntax:
 	$(PYTHON) -B -c 'source = open("gemini_vision.py").read(); compile(source, "gemini_vision.py", "exec")'
 	$(PYTHON) -B -c 'source = open("makeDatabase.py").read(); compile(source, "makeDatabase.py", "exec")'
+	$(PYTHON) -B -c 'source = open("app.py").read(); compile(source, "app.py", "exec")'
 
 test:
 	$(PYTHON) -m unittest discover -s tests
@@ -22,4 +23,8 @@ process:
 
 trade:
 	$(PYTHON) tradeEngine.py
+
+run:
+	$(PYTHON) -m streamlit run app.py
+
 

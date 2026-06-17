@@ -1,9 +1,11 @@
 # MoGoStickers
 
-Local helper scripts for building and updating a Monopoly GO sticker tracker.
+Helper scripts and a web application for tracking Monopoly GO sticker ownership and coordinate trades.
 
 ## What The Scripts Do
 
+- `app.py`: An interactive Streamlit web dashboard where users can select their profile, view stickers they need to send, manually increment counts, and rollback history.
+- `migrate_to_supabase.py`: Pushes the local CSV sticker database counts to the online Supabase database.
 - `makeDatabase.py` downloads the master Google Sheet, keeps the first 7 columns, adds `Hana`, `Jon`, and `Nabil`, then saves `output/sticker_database.csv`.
 - `gemini_vision.py` processes new screenshots and updates each user's sticker counts in `output/sticker_database.csv`.
   * **Direct Ingest (Primary)**: If `google_creds.json` is present, it reads the Google Form response spreadsheet, extracts Google Drive image links, downloads the screenshots in-memory, maps them to users based on email, and updates the database.
@@ -43,7 +45,15 @@ All execution commands automatically detect and run inside the virtual environme
    ```bash
    make process
    ```
-3. **Find grouped sticker sharing opportunities**:
+3. **Sync local updates to the Supabase cloud**:
+   ```bash
+   .venv/bin/python migrate_to_supabase.py
+   ```
+4. **Run the Streamlit Web Application**:
+   ```bash
+   make run
+   ```
+5. **Find grouped sticker sharing opportunities (Terminal fallbacks)**:
    * Check matches directly in the terminal:
      ```bash
      make trade
@@ -70,4 +80,3 @@ The tests are offline and do not call Gemini.
 ```bash
 make test
 ```
-

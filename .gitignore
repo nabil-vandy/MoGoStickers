@@ -4,24 +4,8 @@ __pycache__/
 .venv/
 .env
 
-# Local generated data
-output/*.csv
-screenshots/processed_screenshots.json
-
-# Local screenshot inputs
-screenshots/*.png
-screenshots/*.jpg
-screenshots/*.jpeg
-screenshots/*.PNG
-screenshots/*.JPG
-screenshots/*.JPEG
-screenshots/**/*.png
-screenshots/**/*.jpg
-screenshots/**/*.jpeg
-screenshots/**/*.PNG
-screenshots/**/*.JPG
-screenshots/**/*.JPEG
-
-# Google credentials JSON file
+# Local credentials
 google_creds.json
 
+# Screenshots directory to prevent exposing images or local files
+screenshots/

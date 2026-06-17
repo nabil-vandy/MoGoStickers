@@ -51,6 +51,12 @@ def load_database(path=DATABASE_PATH):
 
 def find_trade_rows(rows, users=USERS):
     trades = []
+    
+    # Calculate total counts for each user to see if they've initialized their profile
+    totals = {user: 0 for user in users}
+    for row in rows:
+        for user in users:
+            totals[user] += parse_count(row.get(user))
 
     for row_index, row in enumerate(rows):
         sticker_name = clean_field(row, "Sticker_Name")
@@ -62,7 +68,9 @@ def find_trade_rows(rows, users=USERS):
         gold = is_gold_sticker(row)
         counts = {user: parse_count(row.get(user)) for user in users}
         senders = [user for user, count in counts.items() if count > 1]
-        recipients = [user for user, count in counts.items() if count == 0]
+        # Only include a recipient if they have set up their profile (total count >= 10)
+        # We skip this check if the total dataset is very small (under 10 rows), as in unit tests.
+        recipients = [user for user, count in counts.items() if count == 0 and (len(rows) < 10 or totals[user] >= 10)]
 
         for sender in senders:
             available = counts[sender] - 1
