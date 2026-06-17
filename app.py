@@ -112,10 +112,22 @@ def update_ownership(sticker_id, hana, jon, nabil):
         "jon": jon,
         "nabil": nabil
     }
+    # Clear Streamlit stickers cache
+    try:
+        if "stickers_cache" in st.session_state:
+            st.session_state.stickers_cache = None
+    except Exception:
+        pass
     # Using PATCH with ID in query string
     return supabase_request(f"ownership?sticker_id=eq.{sticker_id}", method="PATCH", payload=payload)
 
 def apply_rollback(snapshot):
+    # Clear Streamlit stickers cache
+    try:
+        if "stickers_cache" in st.session_state:
+            st.session_state.stickers_cache = None
+    except Exception:
+        pass
     # Snapshot is a list/dictionary of sticker ownership counts
     for item in snapshot:
         update_ownership(item["id"], item["hana"], item["jon"], item["nabil"])
@@ -255,7 +267,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎲 Monopoly GO! Sticker Share")
-st.markdown("Easily coordinate sticker sharing and view trades in real-time. <span style='color: gray; font-size: 0.8em;'>v1.1.0</span>", unsafe_allow_html=True)
+st.markdown("Easily coordinate sticker sharing and view trades in real-time. <span style='color: gray; font-size: 0.8em;'>v1.1.1</span>", unsafe_allow_html=True)
 
 # --- Session State Initialization ---
 # Auto-load profile from query parameters if present, else fallback
@@ -271,6 +283,9 @@ if "undo_backup" not in st.session_state:
 
 if "working_counts" not in st.session_state:
     st.session_state.working_counts = None
+
+if "stickers_cache" not in st.session_state:
+    st.session_state.stickers_cache = None
 
 selected_profile = st.session_state.selected_profile
 
@@ -308,7 +323,9 @@ for p in profiles_meta:
 st.divider()
 
 # Fetch updated dataset
-stickers = fetch_sticker_data()
+if st.session_state.stickers_cache is None:
+    st.session_state.stickers_cache = fetch_sticker_data()
+stickers = st.session_state.stickers_cache
 trades = find_trade_rows(stickers)
 
 # Build a list of unique albums in the order they appear in the database
