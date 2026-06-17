@@ -263,11 +263,16 @@ st.markdown("""
         font-size: 11px;
         border: 1px solid #fde68a;
     }
+
+    /* Customize the markdown green color tag to match #86efac */
+    span[style*="color: rgb(9, 171, 59)"], span[style*="color: green"] {
+        color: #86efac !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🎲 Monopoly GO! Sticker Share")
-st.markdown("Easily coordinate sticker sharing and view trades in real-time. <span style='color: gray; font-size: 0.8em;'>v1.1.1</span>", unsafe_allow_html=True)
+st.markdown("Easily coordinate sticker sharing and view trades in real-time. <span style='color: gray; font-size: 0.8em;'>v1.1.2</span>", unsafe_allow_html=True)
 
 # --- Session State Initialization ---
 # Auto-load profile from query parameters if present, else fallback
@@ -578,46 +583,61 @@ elif mode == "Manual Edit Mode":
     for s in filtered_stickers:
         stickers_by_album.setdefault(s["album"], []).append(s)
         
+    # Helper to render the rows of stickers
+    def render_album_rows(stickers_list, user_col):
+        for sticker in stickers_list:
+            col_name, col_minus, col_val, col_plus = st.columns([3, 1, 1, 1])
+            with col_name:
+                # Gold Format: Monorail Conductor (★★★★★Gold)
+                # Regular Format: Marge ★
+                if sticker["is_gold"]:
+                    st.markdown(
+                        f"<div style='font-size: 20px; line-height: 38px; vertical-align: middle;'><strong>{sticker['name']}</strong> <span style='color: #d97706; font-weight: bold;'>({'★' * sticker['stars']}Gold)</span></div>",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.markdown(
+                        f"<div style='font-size: 20px; line-height: 38px; vertical-align: middle;'><strong>{sticker['name']}</strong> {'★' * sticker['stars']}</div>",
+                        unsafe_allow_html=True
+                    )
+            
+            with col_minus:
+                if st.button("➖", key=f"minus_{sticker['id']}", use_container_width=True):
+                    current_val = st.session_state.working_counts[sticker["id"]][user_col]
+                    orig_val = next(item for item in st.session_state.undo_backup if item["id"] == sticker["id"])[user_col]
+                    # Ensure count doesn't drop to 0 if it was owned (>0)
+                    min_val = 1 if orig_val > 0 else 0
+                    new_val = max(min_val, current_val - 1)
+                    if new_val != current_val:
+                        st.session_state.working_counts[sticker["id"]][user_col] = new_val
+                        st.rerun()
+            
+            with col_val:
+                current_val = st.session_state.working_counts[sticker["id"]][user_col]
+                st.markdown(f"<div style='text-align: center; font-size: 20px; font-weight: bold; line-height: 38px;'>{current_val}</div>", unsafe_allow_html=True)
+            
+            with col_plus:
+                if st.button("➕", key=f"plus_{sticker['id']}", use_container_width=True):
+                    current_val = st.session_state.working_counts[sticker["id"]][user_col]
+                    st.session_state.working_counts[sticker["id"]][user_col] = current_val + 1
+                    st.rerun()
+
     # Display grouped manual edit mode
     for album in ordered_albums:
         if album in stickers_by_album:
-            st.markdown(f"#### <u>{album.upper()}</u>", unsafe_allow_html=True)
-            for sticker in stickers_by_album[album]:
-                col_name, col_minus, col_val, col_plus = st.columns([3, 1, 1, 1])
-                with col_name:
-                    # Gold Format: Monorail Conductor (★★★★★Gold)
-                    # Regular Format: Marge ★
-                    if sticker["is_gold"]:
-                        st.markdown(
-                            f"<div style='font-size: 20px; line-height: 38px; vertical-align: middle;'><strong>{sticker['name']}</strong> <span style='color: #d97706; font-weight: bold;'>({'★' * sticker['stars']}Gold)</span></div>",
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        st.markdown(
-                            f"<div style='font-size: 20px; line-height: 38px; vertical-align: middle;'><strong>{sticker['name']}</strong> {'★' * sticker['stars']}</div>",
-                            unsafe_allow_html=True
-                        )
-                
-                with col_minus:
-                    if st.button("➖", key=f"minus_{sticker['id']}", use_container_width=True):
-                        current_val = st.session_state.working_counts[sticker["id"]][user_col]
-                        orig_val = next(item for item in st.session_state.undo_backup if item["id"] == sticker["id"])[user_col]
-                        # Ensure count doesn't drop to 0 if it was owned (>0)
-                        min_val = 1 if orig_val > 0 else 0
-                        new_val = max(min_val, current_val - 1)
-                        if new_val != current_val:
-                            st.session_state.working_counts[sticker["id"]][user_col] = new_val
-                            st.rerun()
-                
-                with col_val:
-                    current_val = st.session_state.working_counts[sticker["id"]][user_col]
-                    st.markdown(f"<div style='text-align: center; font-size: 20px; font-weight: bold; line-height: 38px;'>{current_val}</div>", unsafe_allow_html=True)
-                
-                with col_plus:
-                    if st.button("➕", key=f"plus_{sticker['id']}", use_container_width=True):
-                        current_val = st.session_state.working_counts[sticker["id"]][user_col]
-                        st.session_state.working_counts[sticker["id"]][user_col] = current_val + 1
-                        st.rerun()
+            album_stickers = stickers_by_album[album]
+            completed_by_all = all(
+                (st.session_state.working_counts[s["id"]]["hana"] >= 1 and
+                 st.session_state.working_counts[s["id"]]["jon"] >= 1 and
+                 st.session_state.working_counts[s["id"]]["nabil"] >= 1)
+                for s in album_stickers
+            )
+            if completed_by_all:
+                with st.expander(f"📁 {album.upper()} — :green[Completed by All]", expanded=False):
+                    render_album_rows(album_stickers, user_col)
+            else:
+                st.markdown(f"#### <u>{album.upper()}</u>", unsafe_allow_html=True)
+                render_album_rows(album_stickers, user_col)
 
 elif mode == "Database Audit":
     st.markdown("### 🔍 Database Audit & Screenshot Viewer")
