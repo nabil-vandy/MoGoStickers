@@ -3,6 +3,8 @@
 ## Project Purpose
 
 This repo tracks Monopoly GO sticker ownership for three users: `Hana`, `Jon`, and `Nabil`.
+The production web dashboard is deployed at [mogostickers.streamlit.app](https://mogostickers.streamlit.app).
+
 
 ## Important Files
 

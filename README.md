@@ -1,6 +1,8 @@
 # MoGoStickers
 
 Helper scripts and a web application for tracking Monopoly GO sticker ownership and coordinate trades.
+The production web dashboard is deployed at [mogostickers.streamlit.app](https://mogostickers.streamlit.app).
+
 
 ## What The Scripts Do
 

@@ -269,6 +269,9 @@ elif "selected_profile" not in st.session_state:
 if "undo_backup" not in st.session_state:
     st.session_state.undo_backup = None
 
+if "working_counts" not in st.session_state:
+    st.session_state.working_counts = None
+
 selected_profile = st.session_state.selected_profile
 
 # --- Header Circle Selector ---
@@ -506,26 +509,40 @@ elif mode == "Manual Edit Mode":
     st.markdown("### ✏️ Manual Edit Mode")
     st.write("Edit sticker counts manually. A local undo option is available to revert recent changes.")
     
-    # Save snapshot for undo backup if not set
+    # Initialize working counts and undo backup if not set
+    if st.session_state.working_counts is None:
+        st.session_state.working_counts = {s["id"]: {"hana": s["hana"], "jon": s["jon"], "nabil": s["nabil"]} for s in stickers}
     if st.session_state.undo_backup is None:
         st.session_state.undo_backup = [{"id": s["id"], "hana": s["hana"], "jon": s["jon"], "nabil": s["nabil"]} for s in stickers]
     
     col_undo, col_save = st.columns([1, 1])
     with col_undo:
         if st.button("Undo Current Changes", use_container_width=True):
-            if st.session_state.undo_backup:
-                # Apply backup
-                apply_rollback(st.session_state.undo_backup)
-                st.session_state.undo_backup = None
-                st.success("Changes reverted successfully!")
-                time.sleep(1)
-                st.rerun()
+            st.session_state.undo_backup = None
+            st.session_state.working_counts = None
+            st.success("Changes reverted successfully!")
+            time.sleep(1)
+            st.rerun()
     with col_save:
         if st.button("Confirm & Commit", type="primary", use_container_width=True):
-            # Save snapshot to database history
-            log_database_state(selected_profile, "Manual adjustments", st.session_state.undo_backup)
+            # Find which stickers actually changed compared to the backup
+            changed_stickers = []
+            for s in stickers:
+                orig = next(item for item in st.session_state.undo_backup if item["id"] == s["id"])
+                curr = st.session_state.working_counts[s["id"]]
+                if curr["hana"] != orig["hana"] or curr["jon"] != orig["jon"] or curr["nabil"] != orig["nabil"]:
+                    changed_stickers.append((s["id"], curr))
+            
+            if changed_stickers:
+                for sticker_id, curr in changed_stickers:
+                    update_ownership(sticker_id, hana=curr["hana"], jon=curr["jon"], nabil=curr["nabil"])
+                log_database_state(selected_profile, "Manual adjustments", st.session_state.undo_backup)
+                st.success(f"Changes committed to database! (Updated {len(changed_stickers)} sticker(s))")
+            else:
+                st.info("No changes to commit.")
+                
             st.session_state.undo_backup = None
-            st.success("Changes committed to database history!")
+            st.session_state.working_counts = None
             time.sleep(1)
             st.rerun()
     
@@ -566,22 +583,23 @@ elif mode == "Manual Edit Mode":
                 
                 with col_minus:
                     if st.button("➖", key=f"minus_{sticker['id']}", use_container_width=True):
+                        current_val = st.session_state.working_counts[sticker["id"]][user_col]
+                        orig_val = next(item for item in st.session_state.undo_backup if item["id"] == sticker["id"])[user_col]
                         # Ensure count doesn't drop to 0 if it was owned (>0)
-                        min_val = 1 if sticker[user_col] > 0 else 0
-                        new_val = max(min_val, sticker[user_col] - 1)
-                        if new_val != sticker[user_col]:
-                            sticker[user_col] = new_val
-                            update_ownership(sticker["id"], hana=sticker["hana"], jon=sticker["jon"], nabil=sticker["nabil"])
+                        min_val = 1 if orig_val > 0 else 0
+                        new_val = max(min_val, current_val - 1)
+                        if new_val != current_val:
+                            st.session_state.working_counts[sticker["id"]][user_col] = new_val
                             st.rerun()
                 
                 with col_val:
-                    st.markdown(f"<div style='text-align: center; font-size: 20px; font-weight: bold; line-height: 38px;'>{sticker[user_col]}</div>", unsafe_allow_html=True)
+                    current_val = st.session_state.working_counts[sticker["id"]][user_col]
+                    st.markdown(f"<div style='text-align: center; font-size: 20px; font-weight: bold; line-height: 38px;'>{current_val}</div>", unsafe_allow_html=True)
                 
                 with col_plus:
                     if st.button("➕", key=f"plus_{sticker['id']}", use_container_width=True):
-                        new_val = sticker[user_col] + 1
-                        sticker[user_col] = new_val
-                        update_ownership(sticker["id"], hana=sticker["hana"], jon=sticker["jon"], nabil=sticker["nabil"])
+                        current_val = st.session_state.working_counts[sticker["id"]][user_col]
+                        st.session_state.working_counts[sticker["id"]][user_col] = current_val + 1
                         st.rerun()
 
 elif mode == "Database Audit":
