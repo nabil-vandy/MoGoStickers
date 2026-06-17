@@ -272,7 +272,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎲 Monopoly GO! Sticker Share")
-st.markdown("Easily coordinate sticker sharing and view trades in real-time. <span style='color: gray; font-size: 0.8em;'>v1.1.2</span>", unsafe_allow_html=True)
+st.markdown("Easily coordinate sticker sharing and view trades in real-time. <span style='color: gray; font-size: 0.8em;'>v2.1.2</span>", unsafe_allow_html=True)
 
 # --- Session State Initialization ---
 # Auto-load profile from query parameters if present, else fallback
