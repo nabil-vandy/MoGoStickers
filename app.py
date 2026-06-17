@@ -17,8 +17,12 @@ if os.path.exists(".env"):
                 key, val = line.strip().split("=", 1)
                 os.environ[key] = val.strip('"').strip("'")
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://nikilnudvxrzxlcrwugq.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_y2JNpZruuo6OOm_h7fodEQ_xcL4G-or")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("SUPABASE_URL and SUPABASE_KEY environment variables are not set. Please configure them in your secrets/environment.")
+    st.stop()
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 

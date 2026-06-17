@@ -3,9 +3,20 @@ import csv
 import json
 import urllib.request
 import urllib.error
+# --- Load Environment Variables ---
+if os.path.exists(".env"):
+    with open(".env") as f:
+        for line in f:
+            if "=" in line and not line.startswith("#"):
+                key, val = line.strip().split("=", 1)
+                os.environ[key] = val.strip('"').strip("'")
 
-SUPABASE_URL = "https://nikilnudvxrzxlcrwugq.supabase.co"
-SUPABASE_KEY = "sb_publishable_y2JNpZruuo6OOm_h7fodEQ_xcL4G-or"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("Error: SUPABASE_URL and SUPABASE_KEY environment variables are not set. Check your .env file.")
+    exit(1)
 
 csv_path = "output/sticker_database.csv"
 
