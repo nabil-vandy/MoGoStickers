@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.env
+screenshots/
+pip_tmp/
+node_modules/
+dist/
+build/
+.next/
+.git/
+**/*.log
+package-lock.json

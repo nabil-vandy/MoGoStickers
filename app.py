@@ -370,7 +370,7 @@ st.markdown("""
     }
 
     /* Hide Streamlit default UI elements (keep stHeader for mobile sidebar toggle) */
-    [data-testid="stFooter"], #MainMenu, [data-testid="stAppDeployButton"] {
+    [data-testid="stFooter"], #MainMenu, [data-testid="stAppDeployButton"], [data-testid="stDecoration"], [data-testid="stHeader"] [data-testid="stToolbar"] {
         visibility: hidden;
         display: none !important;
     }
@@ -380,9 +380,10 @@ st.markdown("""
         box-shadow: none !important;
     }
 
-    /* Remove big gap on top of the page */
+    /* Remove big gap on top and bottom of the page */
     .block-container {
         padding-top: 1.5rem !important;
+        padding-bottom: 1.5rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -486,7 +487,7 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v2.4.2</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v2.4.4</span></div>
     </div>
     """, unsafe_allow_html=True)
 

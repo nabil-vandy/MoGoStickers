@@ -4,8 +4,5 @@ __pycache__/
 .venv/
 .env
 
-# Local credentials
-google_creds.json
-
 # Screenshots directory to prevent exposing images or local files
 screenshots/
