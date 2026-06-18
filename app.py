@@ -479,6 +479,12 @@ st.markdown("""
             gap: 12px;
         }
     }
+
+    /* Hide Streamlit default UI elements */
+    [data-testid="stHeader"], [data-testid="stFooter"], #MainMenu, [data-testid="stAppDeployButton"] {
+        visibility: hidden;
+        display: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
