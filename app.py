@@ -496,10 +496,10 @@ elif "selected_profile" not in st.session_state:
     st.session_state.selected_profile = "Hana"
 
 url_tab = st.query_params.get("tab")
-if url_tab in ["Trades", "Collection", "Audit"]:
+if url_tab in ["Dashboard", "Trades", "Collection", "Audit"]:
     st.session_state.active_tab = url_tab
 elif "active_tab" not in st.session_state:
-    st.session_state.active_tab = "Trades"
+    st.session_state.active_tab = "Dashboard"
 
 if "show_manual_editor" not in st.session_state:
     st.session_state.show_manual_editor = False
