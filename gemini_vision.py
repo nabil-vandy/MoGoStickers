@@ -171,7 +171,7 @@ def safe_parse_json(text):
     return json.loads(text[start:end])
 
 
-def extract_stickers_from_image(client, image_data):
+def extract_stickers_from_image(client, image_data, db_json):
     if isinstance(image_data, bytes):
         image_bytes = image_data
         mime_type = "image/png"
@@ -180,14 +180,17 @@ def extract_stickers_from_image(client, image_data):
         with image_data.open("rb") as file:
             image_bytes = file.read()
 
-    prompt = """
+    prompt = f"""
 Extract the Monopoly GO stickers visible in this screenshot.
 
 Rules:
 - Include only stickers the user owns or has copies of in the image.
 - "count" should be the total number shown for that sticker in the image.
 - If the image shows a duplicate count such as +1, return 2 total.
-- Keep sticker names exactly as they appear when possible.
+- Map the extracted stickers to the correct official names and sets provided in the Database JSON. Do not hallucinate or use names not in the Database.
+
+Database JSON of valid sets and sticker names:
+{db_json}
 """
 
     try:
@@ -460,6 +463,17 @@ def main():
             df[user] = 0
     previous_df = df.copy(deep=True)
 
+    # Generate Database JSON containing valid sets and stickers for Gemini prompt context
+    groups = df.groupby(["Set_Name", "Set_Number"])
+    sets_list = []
+    for (set_name, set_number), group in groups:
+        sets_list.append({
+            "set_name": set_name,
+            "set_number": str(set_number),
+            "stickers": group["Sticker_Name"].tolist()
+        })
+    db_json = json.dumps(sets_list, indent=2)
+
     from google import genai
 
     client = genai.Client(api_key=api_key)
@@ -497,7 +511,7 @@ def main():
                 print(f"Failed to download/load image {image_key}: {e}")
                 continue
 
-            extracted_data = extract_stickers_from_image(client, image_data)
+            extracted_data = extract_stickers_from_image(client, image_data, db_json)
             updated, missing = update_database(df, user, extracted_data)
 
             # Check if this update introduced a regression against baseline
