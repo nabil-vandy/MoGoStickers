@@ -369,8 +369,8 @@ st.markdown("""
         }
     }
 
-    /* Hide Streamlit default UI elements (keep stHeader for mobile sidebar toggle) */
-    [data-testid="stFooter"], #MainMenu, [data-testid="stAppDeployButton"], [data-testid="stDecoration"], [data-testid="stHeader"] [data-testid="stToolbar"] {
+    /* Hide Streamlit default UI elements (keep stHeader for mobile sidebar toggle, keep MainMenu for menu overlay) */
+    [data-testid="stFooter"], [data-testid="stAppDeployButton"], [data-testid="stDecoration"], [data-testid="stHeader"] [data-testid="stToolbar"] {
         visibility: hidden;
         display: none !important;
     }
@@ -378,6 +378,14 @@ st.markdown("""
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
+    }
+
+    /* Ensure sidebar toggle buttons are always visible, on top, and clickable */
+    [data-testid="stSidebarCollapseButton"], [data-testid="stExpandSidebarButton"], div[data-testid="collapsedControl"] {
+        visibility: visible !important;
+        display: inline-flex !important;
+        z-index: 999999 !important;
+        opacity: 1 !important;
     }
 
     /* Remove big gap on top and bottom of the page */
