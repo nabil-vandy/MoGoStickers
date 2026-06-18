@@ -1,6 +1,5 @@
 import os
 import json
-import csv
 import urllib.request
 import urllib.error
 import streamlit as st
@@ -21,11 +20,8 @@ if os.path.exists(".env"):
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-LOCAL_MODE = os.getenv("LOCAL_MODE", "").lower() == "true" or not SUPABASE_URL or not SUPABASE_KEY
 
-if LOCAL_MODE:
-    st.info("ℹ️ Running in Local Mode (using local CSV instead of Supabase). Changes will not affect the production database.")
-elif not SUPABASE_URL or not SUPABASE_KEY:
+if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("SUPABASE_URL and SUPABASE_KEY environment variables are not set. Please configure them in your secrets/environment.")
     st.stop()
 
@@ -81,31 +77,6 @@ def supabase_request(endpoint, method="GET", payload=None):
         return None
 
 def fetch_sticker_data():
-    if LOCAL_MODE:
-        csv_path = "output/sticker_database.csv"
-        if not os.path.exists(csv_path):
-            st.error(f"Local database file not found at: {csv_path}")
-            return []
-        flattened = []
-        try:
-            with open(csv_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    flattened.append({
-                        "id": int(row["MoGo_ID"]) if row.get("MoGo_ID") else hash(row["Sticker_Name"]),
-                        "name": row["Sticker_Name"],
-                        "stars": int(row["Star_Number"]) if row.get("Star_Number") else 1,
-                        "is_gold": row["Gold_Status"].lower() == "true",
-                        "album": row["Set_Name"],
-                        "hana": int(row["Hana"]) if row.get("Hana") else 0,
-                        "jon": int(row["Jon"]) if row.get("Jon") else 0,
-                        "nabil": int(row["Nabil"]) if row.get("Nabil") else 0
-                    })
-            return flattened
-        except Exception as e:
-            st.error(f"Error reading local database: {e}")
-            return []
-
     # Fetch stickers with joined ownership counts
     data = supabase_request("stickers?select=id,name,stars,is_gold,album,ownership(hana,jon,nabil)")
     if not data:
@@ -127,18 +98,6 @@ def fetch_sticker_data():
     return flattened
 
 def fetch_history_logs():
-    if LOCAL_MODE:
-        history_path = "output/local_history.json"
-        if not os.path.exists(history_path):
-            return []
-        try:
-            with open(history_path, "r", encoding="utf-8") as f:
-                history = json.load(f)
-            # Return last 10 entries descending
-            return history[::-1][:10]
-        except Exception as e:
-            st.error(f"Error reading local history: {e}")
-            return []
     return supabase_request("database_history?select=*&order=created_at.desc&limit=10")
 
 def log_database_state(user_profile, action, state_snapshot):
@@ -148,20 +107,6 @@ def log_database_state(user_profile, action, state_snapshot):
         "state_snapshot": state_snapshot,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     }
-    if LOCAL_MODE:
-        history_path = "output/local_history.json"
-        try:
-            history = []
-            if os.path.exists(history_path):
-                with open(history_path, "r", encoding="utf-8") as f:
-                    history = json.load(f)
-            history.append(payload)
-            os.makedirs(os.path.dirname(history_path), exist_ok=True)
-            with open(history_path, "w", encoding="utf-8") as f:
-                json.dump(history, f, indent=2)
-        except Exception as e:
-            st.error(f"Error writing local history: {e}")
-        return
     supabase_request("database_history", method="POST", payload=payload)
 
 def update_ownership(sticker_id, hana, jon, nabil):
@@ -176,37 +121,6 @@ def update_ownership(sticker_id, hana, jon, nabil):
             st.session_state.stickers_cache = None
     except Exception:
         pass
-
-    if LOCAL_MODE:
-        csv_path = "output/sticker_database.csv"
-        if not os.path.exists(csv_path):
-            st.error(f"Local database file not found at: {csv_path}")
-            return None
-        try:
-            rows = []
-            updated = False
-            with open(csv_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
-                for row in reader:
-                    row_id = row.get("MoGo_ID")
-                    if row_id and int(row_id) == int(sticker_id):
-                        row["Hana"] = str(hana)
-                        row["Jon"] = str(jon)
-                        row["Nabil"] = str(nabil)
-                        updated = True
-                    rows.append(row)
-            if not updated:
-                st.warning(f"Sticker with ID {sticker_id} not found in local database.")
-                return None
-            with open(csv_path, "w", encoding="utf-8", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
-            return [{"sticker_id": sticker_id, "hana": hana, "jon": jon, "nabil": nabil}]
-        except Exception as e:
-            st.error(f"Error updating local database: {e}")
-            return None
 
     # Using PATCH with ID in query string
     return supabase_request(f"ownership?sticker_id=eq.{sticker_id}", method="PATCH", payload=payload)
@@ -428,49 +342,24 @@ st.markdown("""
         border-radius: 12px !important;
     }
 
-    /* Keep Trade columns inline on mobile (no collapse) */
-    div[data-testid="stHorizontalBlock"]:has(.sticker-row) {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-        gap: 8px !important;
-        width: 100% !important;
+    /* Trade row wrapper: lock icon + sticker-row side by side (gold stickers only) */
+    .trade-row-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+        width: 100%;
     }
-    div[data-testid="stHorizontalBlock"]:has(.sticker-row) div[data-testid="column"] {
-        margin: 0 !important;
-        padding: 0 !important;
+    .trade-row-wrapper .trade-chk {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 28px;
     }
-    div[data-testid="stHorizontalBlock"]:has(.sticker-row) div[data-testid="column"]:nth-child(1) {
-        width: 45px !important;
-        max-width: 45px !important;
-        min-width: 45px !important;
-        flex: 0 0 45px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }
-    div[data-testid="stHorizontalBlock"]:has(.sticker-row) div[data-testid="column"]:nth-child(2) {
-        width: calc(100% - 53px) !important; /* 45px width + 8px gap */
-        min-width: calc(100% - 53px) !important;
-        flex: 1 1 auto !important;
-        max-width: none !important;
-    }
-
-    /* Reset Streamlit checkbox spacing inside row */
-    div[data-testid="stHorizontalBlock"]:has(.sticker-row) div[data-testid="stCheckbox"] {
-        margin-top: 0 !important;
-        padding-top: 0 !important;
-        margin-bottom: 0 !important;
-        padding-bottom: 0 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }
-    div[data-testid="stHorizontalBlock"]:has(.sticker-row) div[data-testid="stCheckbox"] > label {
-        margin: 0 !important;
-        padding: 0 !important;
+    .trade-row-wrapper .sticker-row {
+        flex: 1 1 0%;
+        min-width: 0;
     }
 
     @media (max-width: 768px) {
@@ -480,10 +369,20 @@ st.markdown("""
         }
     }
 
-    /* Hide Streamlit default UI elements */
-    [data-testid="stHeader"], [data-testid="stFooter"], #MainMenu, [data-testid="stAppDeployButton"] {
+    /* Hide Streamlit default UI elements (keep stHeader for mobile sidebar toggle) */
+    [data-testid="stFooter"], #MainMenu, [data-testid="stAppDeployButton"] {
         visibility: hidden;
         display: none !important;
+    }
+    [data-testid="stHeader"] {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    /* Remove big gap on top of the page */
+    .block-container {
+        padding-top: 1.5rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -731,42 +630,32 @@ elif st.session_state.active_tab == "Trades":
             
             for idx, trade in enumerate(rec_trades):
                 key = f"bulk_chk_{trade['id']}_{recipient.lower()}_{idx}"
-                chk_col, details_col = st.columns([1, 25])
+                stars_str = '★' * trade['stars']
                 
-                with chk_col:
-                    if trade["gold"]:
-                        st.markdown("<div style='padding-top: 8px; text-align: center;'>🔒</div>", unsafe_allow_html=True)
-                        is_checked = False
-                    else:
-                        is_checked = st.checkbox("", key=key, label_visibility="collapsed")
-                        if is_checked:
-                            selected_trades_to_apply.append(trade)
-                            
-                with details_col:
-                    stars_str = '★' * trade['stars']
-                    if trade["gold"]:
-                        gold_label = f"<span style='color: #d97706; font-weight: bold; background-color: #fef3c7; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;'>Gold</span>"
-                        st.markdown(f"""
+                # Build the sticker info HTML
+                if trade["gold"]:
+                    gold_label = f"<span style='color: #d97706; font-weight: bold; background-color: #fef3c7; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;'>Gold</span>"
+                    sticker_label = f"{trade['sticker_name']} {gold_label}"
+                    album_label = trade['album']
+                    # Gold sticker — pure HTML row with lock icon, no checkbox
+                    st.markdown(f"""
+                    <div class="trade-row-wrapper">
+                        <div class="trade-chk">🔒</div>
                         <div class="sticker-row">
-                            <div style="font-size: 14px; font-weight: bold; color: #f4f4f5;">
-                                {trade['sticker_name']} {gold_label}
-                            </div>
-                            <div style="font-size: 12px; color: #71717a; font-style: italic;">
-                                {trade['album']}
-                            </div>
+                            <div style="font-size: 14px; font-weight: bold; color: #f4f4f5;">{sticker_label}</div>
+                            <div style="font-size: 12px; color: #71717a; font-style: italic;">{album_label}</div>
                         </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""
-                        <div class="sticker-row">
-                            <div style="font-size: 14px; font-weight: bold; color: #f4f4f5; display: flex; align-items: center; gap: 8px;">
-                                {trade['sticker_name']} <span style="color: #fbbf24; font-size: 12px;">{stars_str}</span>
-                            </div>
-                            <div style="font-size: 12px; color: #71717a; font-style: italic;">
-                                {trade['album']}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    </div>
+                    """, unsafe_allow_html=True)
+                    is_checked = False
+                else:
+                    # Normal sticker — use st.checkbox with sticker name as label
+                    is_checked = st.checkbox(
+                        f"{trade['sticker_name']}  {stars_str}  —  {trade['album']}",
+                        key=key,
+                    )
+                    if is_checked:
+                        selected_trades_to_apply.append(trade)
                         
         st.markdown("<div style='margin-top: 16px;'></div>", unsafe_allow_html=True)
         action_col_info, action_col_btn = st.columns([4, 1])
