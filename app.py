@@ -369,8 +369,8 @@ st.markdown("""
         }
     }
 
-    /* Hide Streamlit default UI elements (keep stHeader for mobile sidebar toggle, keep MainMenu for menu overlay) */
-    [data-testid="stFooter"], [data-testid="stAppDeployButton"], [data-testid="stDecoration"], [data-testid="stHeader"] [data-testid="stToolbar"] {
+    /* Hide Streamlit default UI elements (keep stHeader/stToolbar for sidebar toggle/MainMenu overlay) */
+    [data-testid="stFooter"], [data-testid="stAppDeployButton"], [data-testid="stDecoration"] {
         visibility: hidden;
         display: none !important;
     }
@@ -378,14 +378,25 @@ st.markdown("""
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
+        /* Keep header visible so the sidebar expand button remains accessible */
+        min-height: 3.5rem !important;
+        height: auto !important;
     }
 
-    /* Ensure sidebar toggle buttons are always visible, on top, and clickable */
-    [data-testid="stSidebarCollapseButton"], [data-testid="stExpandSidebarButton"], div[data-testid="collapsedControl"] {
+    /* Ensure ALL sidebar toggle/expand buttons are always visible and clickable.
+       Streamlit uses different data-testid values across versions, so we target all variants. */
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapsedControl"],
+    div[data-testid="collapsedControl"],
+    button[data-testid="stSidebarCollapseButton"],
+    button[data-testid="stExpandSidebarButton"] {
         visibility: visible !important;
         display: inline-flex !important;
         z-index: 999999 !important;
         opacity: 1 !important;
+        pointer-events: auto !important;
     }
 
     /* Remove big gap on top and bottom of the page */
