@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+.streamlit/secrets.toml
 
 # Screenshots directory to prevent exposing images or local files
 screenshots/
+
+# Local DB/code save points (large, may contain data dumps)
+backups/

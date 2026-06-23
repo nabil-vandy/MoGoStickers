@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mogostickers",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["/tmp/mogo_launch.py"],
+      "port": 8501
+    }
+  ]
+}
