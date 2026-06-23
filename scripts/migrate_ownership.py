@@ -24,7 +24,7 @@ Usage
     export HANA_EMAIL="hana@example.com"
     export NABIL_EMAIL="nabs@example.com"
     export JON_EMAIL="jon@example.com"
-    export ADMIN_EMAIL="$JON_EMAIL"   # which of them is the admin (defaults to Jon)
+    export ADMIN_EMAILS="$JON_EMAIL,$NABIL_EMAIL"  # admin(s), comma-separated (defaults to Jon)
 
     python scripts/migrate_ownership.py            # dry run: report only, writes profiles
     python scripts/migrate_ownership.py --apply    # actually write ownership rows
@@ -54,7 +54,10 @@ SEED_PROFILES = [
     {"legacy_col": "jon",   "screenname": "RefinedBoot32", "real_name": "Jon",
      "email": os.environ.get("JON_EMAIL"),   "emoji": "⚡", "color": "#93c5fd"},
 ]
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL") or os.environ.get("JON_EMAIL")
+# One or more admins, comma-separated. Falls back to ADMIN_EMAIL, then Jon.
+_admins_raw = os.environ.get("ADMIN_EMAILS") or os.environ.get("ADMIN_EMAIL") \
+    or os.environ.get("JON_EMAIL") or ""
+ADMIN_EMAILS = {e.strip().lower() for e in _admins_raw.split(",") if e.strip()}
 
 BASE_HEADERS = {
     "apikey": SERVICE_KEY,
@@ -93,7 +96,7 @@ def seed_profiles():
             "emoji": p["emoji"],
             "color": p["color"],
             "approved": True,
-            "is_admin": (p["email"] == ADMIN_EMAIL),
+            "is_admin": (p["email"].lower() in ADMIN_EMAILS),
         })
     # Upsert on the unique email column.
     result = request(

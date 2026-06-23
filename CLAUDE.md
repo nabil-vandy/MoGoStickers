@@ -10,11 +10,13 @@ make syntax   # compile-check app.py only
 make run      # streamlit run app.py (uses .venv/bin/python if present)
 ```
 
-**Preview** (Claude Code desktop): uses `.claude/launch.json` + `/tmp/mogo_launch.py`. The preview sandbox blocks `os.getcwd()` and file access to `~/Documents`, so the launcher copies app files to `/tmp/mogostickers/` and monkey-patches the blocked syscalls. After editing source files, resync the copy before reloading the preview:
+**Preview** (Claude Code desktop): uses `.claude/launch.json` + `.claude/run_app.sh`. The preview sandbox blocks `os.getcwd()` and file access to `~/Documents`, so the launcher copies app files to `/tmp/mogostickers/` and monkey-patches the blocked syscalls. After editing source files, resync the copy before reloading the preview:
 
 ```bash
 cp app.py db.py auth.py gemini.py /tmp/mogostickers/
 ```
+
+Note: the Claude preview cannot complete Google OIDC login (sandbox blocks the OAuth redirect). Use the live site at https://mogostickers.streamlit.app/ for end-to-end auth testing.
 
 ## Architecture
 
@@ -39,6 +41,8 @@ Four Python files; no framework besides Streamlit.
 
 **Database tables**: `stickers`, `profiles`, `invites`, `ownership`, `uploads`, `upload_items`, `database_history`. Screenshots persist in the private Supabase Storage bucket `screenshots/`.
 
+`ownership_legacy` still exists in the DB (renamed from `ownership` during migration 001). Drop it only after verifying sticker totals in the live app, then run `migrations/002_drop_legacy.sql`.
+
 ## Key Constraints
 
 - A user may only write `ownership` rows where `user_id == current_user["id"]`.
@@ -51,8 +55,20 @@ Four Python files; no framework besides Streamlit.
 
 ## Secrets / Config
 
-All credentials go in `.streamlit/secrets.toml` (gitignored). Required keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `GEMINI_API_KEY`. Optional: `GEMINI_MODEL` (default `gemini-3.1-flash-lite`). The `[auth]` + `[auth.google]` blocks configure OIDC. See `.streamlit/secrets.toml.example`.
+All credentials go in `.streamlit/secrets.toml` (gitignored). On Streamlit Cloud, paste the same content into **Settings → Secrets**.
+
+Required keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `GEMINI_API_KEY`. Optional: `GEMINI_MODEL` (default `gemini-3.1-flash-lite`). The `[auth]` + `[auth.google]` blocks configure OIDC. See `.streamlit/secrets.toml.example`.
+
+**Key name**: `db.py` reads `SUPABASE_SERVICE_KEY` (falling back to `SUPABASE_KEY` for backwards-compat). Always use `SUPABASE_SERVICE_KEY` in new config.
+
+**OAuth redirect URI**: the Google Cloud Console client must have `https://mogostickers.streamlit.app/oauth2callback` as an authorized redirect URI (Streamlit appends `/oauth2callback`, not just `/`).
+
+## Deployment
+
+Auto-deploys from GitHub `nabil-vandy/MoGoStickers` (branch `main`) to https://mogostickers.streamlit.app/ via Streamlit Cloud. Push to `main` to deploy.
 
 ## Migration
 
-Schema migrations live in `migrations/`. Run order: `001_normalize_and_auth.sql` → `scripts/migrate_ownership.py --apply` → `002_drop_legacy.sql`. Never run on prod without testing on a Supabase branch first.
+Schema migrations live in `migrations/`. Run order: `001_normalize_and_auth.sql` (in the Supabase SQL editor) → `scripts/migrate_ownership.py --apply` → `002_drop_legacy.sql`. Never run on prod without testing on a Supabase branch first.
+
+A pre-go-live DB snapshot lives in `backups/20260622-191721-prelive/` with a `restore.py` script. Git tag `prelive-savepoint-20260622` marks the code at that point.
