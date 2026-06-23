@@ -210,7 +210,7 @@ my_id = current_user["id"]
 my_name = current_user["screenname"]
 
 # --- Session State Initialization ---
-TABS = ["Dashboard", "Trades", "Collection", "Audit"]
+TABS = ["Dashboard", "Trades", "Upload", "Manifest"]
 if current_user.get("is_admin"):
     TABS.append("Admin")
 
@@ -220,7 +220,6 @@ if url_tab in TABS:
 elif "active_tab" not in st.session_state:
     st.session_state.active_tab = "Dashboard"
 
-st.session_state.setdefault("show_manual_editor", False)
 st.session_state.setdefault("undo_backup", None)
 st.session_state.setdefault("working_counts", None)
 st.session_state.setdefault("stickers_cache", None)
@@ -327,13 +326,13 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.0.0</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.0.2</span></div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("<div style='font-size: 11px; font-weight: bold; color: #71717a; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;'>Navigation</div>", unsafe_allow_html=True)
 
-    tab_icons = {"Dashboard": "📊", "Trades": "⚡", "Collection": "📁", "Audit": "🔍", "Admin": "🛠️"}
+    tab_icons = {"Dashboard": "📊", "Trades": "⚡", "Upload": "🔍", "Manifest": "📁", "Admin": "🛠️"}
     for tab in TABS:
         is_active = (st.session_state.active_tab == tab)
         btn_type = "primary" if is_active else "secondary"
@@ -391,7 +390,7 @@ if st.session_state.active_tab == "Dashboard":
                 <div style="font-size: 11px; color: #71717a; margin-top: 2px;">Incoming ➔</div>
             </div>
         </a>
-        <a href="/?tab=Collection" target="_self" style="text-decoration: none; color: inherit;">
+        <a href="/?tab=Manifest" target="_self" style="text-decoration: none; color: inherit;">
             <div class="metric-card">
                 <div style="font-size: 24px; margin-bottom: 6px;">✅</div>
                 <div style="font-size: 32px; font-weight: 800; color: #34d399; line-height: 1.1;">{completed_val}</div>
@@ -399,7 +398,7 @@ if st.session_state.active_tab == "Dashboard":
                 <div style="font-size: 11px; color: #71717a; margin-top: 2px;">Stickers ➔</div>
             </div>
         </a>
-        <a href="/?tab=Collection" target="_self" style="text-decoration: none; color: inherit;">
+        <a href="/?tab=Manifest" target="_self" style="text-decoration: none; color: inherit;">
             <div class="metric-card">
                 <div style="font-size: 24px; margin-bottom: 6px;">📁</div>
                 <div style="font-size: 32px; font-weight: 800; color: #c084fc; line-height: 1.1;">{missing_val}</div>
@@ -490,185 +489,13 @@ elif st.session_state.active_tab == "Trades":
                 time.sleep(1)
                 st.rerun()
 
-# 3. COLLECTION TAB
-elif st.session_state.active_tab == "Collection":
-    album_progress = {}
-    for album in ordered_albums:
-        album_stickers = [s for s in stickers if s["album"] == album]
-        owned_count = sum(1 for s in album_stickers if db.ownership_for(s, my_id)["owned"])
-        total = len(album_stickers) if album_stickers else 9
-        album_progress[album] = {"owned": owned_count, "total": total,
-                                 "pct": int((owned_count / total) * 100)}
+# 3. UPLOAD TAB
+elif st.session_state.active_tab == "Upload":
+    st.markdown("## 🔍 Upload Center")
+    st.markdown("Upload screenshots, review what the analysis found, and edit **your** counts manually.")
 
-    st.markdown("## 📁 Sticker Collection")
-    st.markdown("Browse all albums and view ownership. Toggle Edit Mode to adjust **your** counts.")
-    st.markdown("<div style='margin-bottom: 24px;'></div>", unsafe_allow_html=True)
-
-    if st.session_state.show_manual_editor:
-        # Edit only the current user's owned/extras.
-        if st.session_state.working_counts is None:
-            st.session_state.working_counts = {
-                s["id"]: dict(db.ownership_for(s, my_id)) for s in stickers
-            }
-        if st.session_state.undo_backup is None:
-            st.session_state.undo_backup = {
-                s["id"]: dict(db.ownership_for(s, my_id)) for s in stickers
-            }
-
-        col_undo, col_save = st.columns([1, 1])
-        with col_undo:
-            if st.button("Undo Current Changes", use_container_width=True):
-                st.session_state.undo_backup = None
-                st.session_state.working_counts = None
-                st.success("Changes reverted successfully!")
-                time.sleep(1)
-                st.rerun()
-        with col_save:
-            if st.button("Confirm & Commit", type="primary", use_container_width=True):
-                changed = []
-                for s in stickers:
-                    orig = st.session_state.undo_backup[s["id"]]
-                    curr = st.session_state.working_counts[s["id"]]
-                    if curr["owned"] != orig["owned"] or curr["extras"] != orig["extras"]:
-                        changed.append((s["id"], curr))
-                if changed:
-                    db.log_history(my_id, "Manual adjustments", db.snapshot_ownership(stickers, pool))
-                    for sticker_id, curr in changed:
-                        db.upsert_ownership(my_id, sticker_id, curr["owned"], curr["extras"])
-                    st.success(f"Committed {len(changed)} change(s) to the database!")
-                else:
-                    st.info("No changes to commit.")
-                st.session_state.undo_backup = None
-                st.session_state.working_counts = None
-                time.sleep(1)
-                st.rerun()
-
-        search_query = st.text_input("🔍 Filter stickers by name or album", "")
-        filtered = [s for s in stickers if not search_query
-                    or search_query.lower() in s["name"].lower()
-                    or search_query.lower() in s["album"].lower()]
-        by_album = {}
-        for s in filtered:
-            by_album.setdefault(s["album"], []).append(s)
-
-        def render_edit_rows(rows):
-            for sticker in rows:
-                wc = st.session_state.working_counts[sticker["id"]]
-                col_name, col_own, col_minus, col_val, col_plus = st.columns([3, 1.4, 1, 1, 1])
-                with col_name:
-                    stars_str = '★' * sticker['stars']
-                    gold = " <span style='color:#d97706;font-weight:bold;'>(Gold)</span>" if sticker["is_gold"] else ""
-                    st.markdown(
-                        f"<div style='font-size:16px;line-height:38px;'><strong>{sticker['name']}</strong> {stars_str}{gold}</div>",
-                        unsafe_allow_html=True)
-                with col_own:
-                    owned = st.checkbox("Own", value=wc["owned"], key=f"own_{sticker['id']}")
-                    if owned != wc["owned"]:
-                        wc["owned"] = owned
-                        if not owned:
-                            wc["extras"] = 0
-                        st.rerun()
-                with col_minus:
-                    if st.button("➖", key=f"minus_{sticker['id']}", use_container_width=True,
-                                 disabled=not wc["owned"]):
-                        if wc["extras"] > 0:
-                            wc["extras"] -= 1
-                            st.rerun()
-                with col_val:
-                    badge = f"+{wc['extras']}" if wc["owned"] else "—"
-                    st.markdown(f"<div style='text-align:center;font-size:18px;font-weight:bold;line-height:38px;'>{badge}</div>", unsafe_allow_html=True)
-                with col_plus:
-                    if st.button("➕", key=f"plus_{sticker['id']}", use_container_width=True,
-                                 disabled=not wc["owned"]):
-                        wc["extras"] += 1
-                        st.rerun()
-
-        for album in ordered_albums:
-            if album in by_album:
-                meta = ALBUM_META.get(album, {"emoji": "📁", "color": "#3b82f6"})
-                st.markdown(f"#### <u>{meta['emoji']} {album.upper()}</u>", unsafe_allow_html=True)
-                render_edit_rows(by_album[album])
-    else:
-        # Browse mode: read-only totals for every pool member (dynamic columns).
-        by_album = {}
-        for s in stickers:
-            by_album.setdefault(s["album"], []).append(s)
-
-        for album in ordered_albums:
-            if album not in by_album:
-                continue
-            album_stickers = by_album[album]
-            progress = album_progress[album]
-            meta = ALBUM_META.get(album, {"emoji": "📁", "color": "#3b82f6"})
-
-            completed_by_all = all(
-                all(db.ownership_for(s, p["id"])["owned"] for p in pool)
-                for s in album_stickers
-            ) if pool else False
-
-            comp_badge = "✅ All Done" if completed_by_all else f"{progress['owned']}/{progress['total']}"
-            with st.expander(f"{meta['emoji']} {album.upper()} — {comp_badge}", expanded=not completed_by_all):
-                header_cells = "".join(
-                    f"<th style='text-align:center;padding:8px 0;width:90px;'>{p.get('emoji','👤')} {p['screenname']}</th>"
-                    for p in pool
-                )
-                table_html = textwrap.dedent(f"""
-                <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
-                    <thead>
-                        <tr style="border-bottom: 1px solid #1e293b; color: #71717a; font-size: 13px;">
-                            <th style="text-align: left; padding: 8px 0;">Sticker</th>
-                            {header_cells}
-                        </tr>
-                    </thead>
-                    <tbody>
-                """)
-                for sticker in album_stickers:
-                    stars_str = '★' * sticker['stars']
-                    disp = f"<strong>{sticker['name']}</strong> <span style='color: #fbbf24;'>{stars_str}</span>"
-                    if sticker["is_gold"]:
-                        disp += " <span style='color: #d97706; font-size: 11px; font-weight: bold;'>[Gold]</span>"
-                    cells = ""
-                    for p in pool:
-                        o = db.ownership_for(sticker, p["id"])
-                        total = db.total_for(o["owned"], o["extras"])
-                        hl = f"font-weight:bold;color:{p.get('color','#f4f4f5')};" if p["id"] == my_id else "color:#f4f4f5;"
-                        val = "<span style='color:#4b5563;'>0</span>" if total == 0 else f"<span style='{hl}'>{total}</span>"
-                        cells += f"<td style='padding:10px 0;text-align:center;width:90px;'>{val}</td>"
-                    table_html += textwrap.dedent(f"""
-                    <tr style="border-bottom: 1px solid rgba(30, 41, 59, 0.4); font-size: 14px;">
-                        <td style="padding: 10px 0; text-align: left;">{disp}</td>
-                        {cells}
-                    </tr>
-                    """)
-                table_html += "</tbody></table>"
-                st.markdown(table_html, unsafe_allow_html=True)
-
-    st.markdown("<hr style='margin: 32px 0 24px 0; border: 0; border-top: 1px solid #1e293b;'>", unsafe_allow_html=True)
-    col_tgl_info, col_tgl_btn = st.columns([3, 1])
-    with col_tgl_info:
-        if st.session_state.show_manual_editor:
-            st.markdown("<div style='padding-top: 8px; font-weight: bold; color: #fb923c;'>⚠️ EDITING YOUR COUNTS</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div style='padding-top: 8px; color: #a1a1aa;'>View ownership across all users.</div>", unsafe_allow_html=True)
-    with col_tgl_btn:
-        if st.session_state.show_manual_editor:
-            if st.button("Close Editor ✕", key="btn_close_editor", use_container_width=True):
-                st.session_state.show_manual_editor = False
-                st.session_state.working_counts = None
-                st.session_state.undo_backup = None
-                st.rerun()
-        else:
-            if st.button("✏️ Edit My Counts", key="btn_open_editor", type="primary", use_container_width=True):
-                st.session_state.show_manual_editor = True
-                st.rerun()
-
-# 4. AUDIT TAB
-elif st.session_state.active_tab == "Audit":
-    st.markdown("## 🔍 Audit & Upload Center")
-    st.markdown("Upload screenshots, review what the analysis found, and roll back if needed.")
-
-    audit_mode = st.radio("Choose Audit Sub-tab",
-                          ["Upload Screenshots", "Review Last Upload", "History & Rollbacks"],
+    audit_mode = st.radio("Choose Upload Sub-tab",
+                          ["Upload Screenshots", "Review Last Upload", "Manual Edit"],
                           horizontal=True)
     st.divider()
 
@@ -851,28 +678,163 @@ elif st.session_state.active_tab == "Audit":
             with st.expander("🔬 Raw Gemini response (why the count was chosen)"):
                 st.json(upload.get("raw_response") or {})
 
-    # ---- History & Rollbacks ----
-    elif audit_mode == "History & Rollbacks":
-        st.markdown("### 📜 Database History & Rollbacks")
-        st.write("Revert ownership to a previous state to fix mistakes.")
-        history = db.fetch_history()
-        if not history:
-            st.info("No history actions logged yet.")
-        else:
-            name_by_id = {p["id"]: p["screenname"] for p in pool}
-            for entry in history:
-                col_info, col_rev = st.columns([3, 1])
-                actor = name_by_id.get(entry.get("user_id"), entry.get("user_profile", "Unknown"))
-                with col_info:
-                    st.markdown(f"**{actor}**: {entry['action']}\n\n*Logged at {entry['created_at']}*")
-                with col_rev:
-                    if st.button("Revert", key=f"rev_{entry['id']}", use_container_width=True):
-                        db.log_history(my_id, f"Reverted to state from {entry['created_at']}",
-                                       db.snapshot_ownership(stickers, pool))
-                        db.apply_rollback(entry["state_snapshot"])
-                        st.success("Database reverted successfully!")
-                        time.sleep(1)
+    # ---- Manual Edit ----
+    elif audit_mode == "Manual Edit":
+        st.markdown("### ✏️ Manual Edit")
+        st.write("Adjust **your** owned stickers and extra (+N) counts directly. "
+                 "Nothing is saved until you Confirm & Commit.")
+
+        # Edit only the current user's owned/extras.
+        if st.session_state.working_counts is None:
+            st.session_state.working_counts = {
+                s["id"]: dict(db.ownership_for(s, my_id)) for s in stickers
+            }
+        if st.session_state.undo_backup is None:
+            st.session_state.undo_backup = {
+                s["id"]: dict(db.ownership_for(s, my_id)) for s in stickers
+            }
+
+        col_undo, col_save = st.columns([1, 1])
+        with col_undo:
+            if st.button("Undo Current Changes", use_container_width=True):
+                st.session_state.undo_backup = None
+                st.session_state.working_counts = None
+                st.success("Changes reverted successfully!")
+                time.sleep(1)
+                st.rerun()
+        with col_save:
+            if st.button("Confirm & Commit", type="primary", use_container_width=True):
+                changed = []
+                for s in stickers:
+                    orig = st.session_state.undo_backup[s["id"]]
+                    curr = st.session_state.working_counts[s["id"]]
+                    if curr["owned"] != orig["owned"] or curr["extras"] != orig["extras"]:
+                        changed.append((s["id"], curr))
+                if changed:
+                    db.log_history(my_id, "Manual adjustments", db.snapshot_ownership(stickers, pool))
+                    for sticker_id, curr in changed:
+                        db.upsert_ownership(my_id, sticker_id, curr["owned"], curr["extras"])
+                    st.success(f"Committed {len(changed)} change(s) to the database!")
+                else:
+                    st.info("No changes to commit.")
+                st.session_state.undo_backup = None
+                st.session_state.working_counts = None
+                time.sleep(1)
+                st.rerun()
+
+        search_query = st.text_input("🔍 Filter stickers by name or album", "")
+        filtered = [s for s in stickers if not search_query
+                    or search_query.lower() in s["name"].lower()
+                    or search_query.lower() in s["album"].lower()]
+        by_album = {}
+        for s in filtered:
+            by_album.setdefault(s["album"], []).append(s)
+
+        def render_edit_rows(rows):
+            for sticker in rows:
+                wc = st.session_state.working_counts[sticker["id"]]
+                col_name, col_own, col_minus, col_val, col_plus = st.columns([3, 1.4, 1, 1, 1])
+                with col_name:
+                    stars_str = '★' * sticker['stars']
+                    gold = " <span style='color:#d97706;font-weight:bold;'>(Gold)</span>" if sticker["is_gold"] else ""
+                    st.markdown(
+                        f"<div style='font-size:16px;line-height:38px;'><strong>{sticker['name']}</strong> {stars_str}{gold}</div>",
+                        unsafe_allow_html=True)
+                with col_own:
+                    owned = st.checkbox("Own", value=wc["owned"], key=f"own_{sticker['id']}")
+                    if owned != wc["owned"]:
+                        wc["owned"] = owned
+                        if not owned:
+                            wc["extras"] = 0
                         st.rerun()
+                with col_minus:
+                    if st.button("➖", key=f"minus_{sticker['id']}", use_container_width=True,
+                                 disabled=not wc["owned"]):
+                        if wc["extras"] > 0:
+                            wc["extras"] -= 1
+                            st.rerun()
+                with col_val:
+                    badge = f"+{wc['extras']}" if wc["owned"] else "—"
+                    st.markdown(f"<div style='text-align:center;font-size:18px;font-weight:bold;line-height:38px;'>{badge}</div>", unsafe_allow_html=True)
+                with col_plus:
+                    if st.button("➕", key=f"plus_{sticker['id']}", use_container_width=True,
+                                 disabled=not wc["owned"]):
+                        wc["extras"] += 1
+                        st.rerun()
+
+        for album in ordered_albums:
+            if album in by_album:
+                meta = ALBUM_META.get(album, {"emoji": "📁", "color": "#3b82f6"})
+                st.markdown(f"#### <u>{meta['emoji']} {album.upper()}</u>", unsafe_allow_html=True)
+                render_edit_rows(by_album[album])
+
+# 4. MANIFEST TAB
+elif st.session_state.active_tab == "Manifest":
+    album_progress = {}
+    for album in ordered_albums:
+        album_stickers = [s for s in stickers if s["album"] == album]
+        owned_count = sum(1 for s in album_stickers if db.ownership_for(s, my_id)["owned"])
+        total = len(album_stickers) if album_stickers else 9
+        album_progress[album] = {"owned": owned_count, "total": total,
+                                 "pct": int((owned_count / total) * 100)}
+
+    st.markdown("## 📁 Manifest")
+    st.markdown("Browse all albums and view ownership across every member.")
+    st.markdown("<div style='margin-bottom: 24px;'></div>", unsafe_allow_html=True)
+
+    # Read-only totals for every pool member (dynamic columns).
+    by_album = {}
+    for s in stickers:
+        by_album.setdefault(s["album"], []).append(s)
+
+    for album in ordered_albums:
+        if album not in by_album:
+            continue
+        album_stickers = by_album[album]
+        progress = album_progress[album]
+        meta = ALBUM_META.get(album, {"emoji": "📁", "color": "#3b82f6"})
+
+        completed_by_all = all(
+            all(db.ownership_for(s, p["id"])["owned"] for p in pool)
+            for s in album_stickers
+        ) if pool else False
+
+        comp_badge = "✅ All Done" if completed_by_all else f"{progress['owned']}/{progress['total']}"
+        with st.expander(f"{meta['emoji']} {album.upper()} — {comp_badge}", expanded=not completed_by_all):
+            header_cells = "".join(
+                f"<th style='text-align:center;padding:8px 0;width:90px;'>{p.get('emoji','👤')} {p['screenname']}</th>"
+                for p in pool
+            )
+            table_html = textwrap.dedent(f"""
+            <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #1e293b; color: #71717a; font-size: 13px;">
+                        <th style="text-align: left; padding: 8px 0;">Sticker</th>
+                        {header_cells}
+                    </tr>
+                </thead>
+                <tbody>
+            """)
+            for sticker in album_stickers:
+                stars_str = '★' * sticker['stars']
+                disp = f"<strong>{sticker['name']}</strong> <span style='color: #fbbf24;'>{stars_str}</span>"
+                if sticker["is_gold"]:
+                    disp += " <span style='color: #d97706; font-size: 11px; font-weight: bold;'>[Gold]</span>"
+                cells = ""
+                for p in pool:
+                    o = db.ownership_for(sticker, p["id"])
+                    total = db.total_for(o["owned"], o["extras"])
+                    hl = f"font-weight:bold;color:{p.get('color','#f4f4f5')};" if p["id"] == my_id else "color:#f4f4f5;"
+                    val = "<span style='color:#4b5563;'>0</span>" if total == 0 else f"<span style='{hl}'>{total}</span>"
+                    cells += f"<td style='padding:10px 0;text-align:center;width:90px;'>{val}</td>"
+                table_html += textwrap.dedent(f"""
+                <tr style="border-bottom: 1px solid rgba(30, 41, 59, 0.4); font-size: 14px;">
+                    <td style="padding: 10px 0; text-align: left;">{disp}</td>
+                    {cells}
+                </tr>
+                """)
+            table_html += "</tbody></table>"
+            st.markdown(table_html, unsafe_allow_html=True)
 
 # 5. ADMIN TAB
 elif st.session_state.active_tab == "Admin":
@@ -933,3 +895,8 @@ elif st.session_state.active_tab == "Admin":
                 st.write(f"`{inv['code']}` → **{inv['screenname']}** ({used})")
 
 st.divider()
+st.markdown(
+    "<div style='text-align: center; color: #71717a; font-size: 12px; padding: 8px 0;'>"
+    "Monopoly GO! Sticker Share · v3.0.2</div>",
+    unsafe_allow_html=True,
+)
