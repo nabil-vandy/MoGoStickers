@@ -370,7 +370,7 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.2.0</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.3.0</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -498,7 +498,9 @@ if st.session_state.active_tab == "Dashboard":
     # Count distinct stickers, not trade rows (a duplicate can match many recipients).
     ready_to_send_val = len({t["sticker_id"] for t in trades
                              if t["sender_id"] == my_id and not t["gold"]})
-    pending_trades_val = len({t["sticker_id"] for t in trades if t["recipient_id"] == my_id})
+    # Gold is manual-only on the receive side too — don't count it as auto-receivable.
+    pending_trades_val = len({t["sticker_id"] for t in trades
+                              if t["recipient_id"] == my_id and not t["gold"]})
     completed_val = sum(1 for s in stickers if db.ownership_for(s, my_id)["owned"])
     missing_val = sum(1 for s in stickers if not db.ownership_for(s, my_id)["owned"])
 
@@ -649,10 +651,22 @@ elif st.session_state.active_tab == "Trades":
             """, unsafe_allow_html=True)
             for trade in snd_trades:
                 stars_str = '★' * trade['stars']
-                gold_tag = " (Gold)" if trade["gold"] else ""
                 rec_key = f"recv_chk_{trade['sticker_id']}_{sender_id}"
-                if st.checkbox(
-                        f"{trade['sticker_name']}{gold_tag}  {stars_str}  —  {trade['album']}",
+                # Gold is manual-only — show it locked (🔒) just like the send side,
+                # so no one tries to receive it through the auto-flow.
+                if trade["gold"]:
+                    gold_label = "<span style='color: #d97706; font-weight: bold; background-color: #fef3c7; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;'>Gold</span>"
+                    st.markdown(f"""
+                    <div class="trade-row-wrapper">
+                        <div class="trade-chk">🔒</div>
+                        <div class="sticker-row">
+                            <div style="font-size: 14px; font-weight: bold; color: #f4f4f5;">{trade['sticker_name']} {gold_label}</div>
+                            <div style="font-size: 12px; color: #71717a; font-style: italic;">{trade['album']}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif st.checkbox(
+                        f"{trade['sticker_name']}  {stars_str}  —  {trade['album']}",
                         key=rec_key):
                     received_sticker_ids.add(trade["sticker_id"])
 
@@ -942,7 +956,7 @@ elif st.session_state.active_tab == "Upload":
                       <thead><tr>
                         <th style='{th}'>Detected</th>
                         <th style='{th}'>Matched</th>
-                        <th style='{th}'>Precision</th>
+                        <th style='{th}'>Fit</th>
                         <th style='{th}'>New</th>
                         <th style='{th}'>Was</th>
                       </tr></thead>
@@ -1173,6 +1187,6 @@ elif st.session_state.active_tab == "Admin":
 st.divider()
 st.markdown(
     "<div style='text-align: center; color: #71717a; font-size: 12px; padding: 8px 0;'>"
-    "Monopoly GO! Sticker Share · v3.2.0</div>",
+    "Monopoly GO! Sticker Share · v3.3.0</div>",
     unsafe_allow_html=True,
 )
