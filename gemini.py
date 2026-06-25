@@ -9,11 +9,13 @@ The model reports, per sticker it can see:
 This maps 1:1 to the DB's ownership(owned, extras) — no "+1 -> total 2" math.
 """
 import difflib
+import io
 import json
 import os
 
 from google import genai
 from google.genai import types
+from PIL import Image
 from pydantic import BaseModel
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -33,6 +35,31 @@ class SetInfo(BaseModel):
 
 def _normalize(name):
     return " ".join((name or "").lower().split())
+
+
+def crop_screenshot(image_bytes, mime_type=None, top=0.09, bottom=0.15):
+    """Trim the top `top` and bottom `bottom` fractions (game UI noise) from a
+    screenshot, keeping the middle band. Returns (cropped_bytes, mime_type).
+    Fail-soft: returns the original bytes unchanged if decoding/encoding fails.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img.load()
+        w, h = img.size
+        y0 = round(h * top)
+        y1 = round(h * (1 - bottom))
+        if y1 <= y0:  # degenerate (tiny image) — leave it alone
+            return image_bytes, mime_type
+        cropped = img.crop((0, y0, w, y1))
+        fmt = img.format or ("PNG" if (mime_type or "").endswith("png") else "JPEG")
+        if fmt == "JPEG" and cropped.mode in ("RGBA", "P"):
+            cropped = cropped.convert("RGB")
+        buf = io.BytesIO()
+        cropped.save(buf, format=fmt)
+        out_mime = "image/png" if fmt == "PNG" else "image/jpeg"
+        return buf.getvalue(), out_mime
+    except Exception:
+        return image_bytes, mime_type
 
 
 def build_reference(stickers):

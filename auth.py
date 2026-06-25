@@ -44,7 +44,7 @@ def require_auth():
 
 
 def render_account_controls(profile):
-    """Sidebar: who's logged in, change-screenname, logout."""
+    """Sidebar: who's logged in, plus logout. Screennames are admin-managed."""
     st.markdown(
         f"<div style='font-size:11px;font-weight:bold;color:#71717a;text-transform:uppercase;"
         f"letter-spacing:.05em;margin-bottom:8px;'>Account</div>",
@@ -57,15 +57,6 @@ def render_account_controls(profile):
         f"{profile['screenname']}</span></div>",
         unsafe_allow_html=True,
     )
-    with st.popover("Change screenname", use_container_width=True):
-        new_name = st.text_input("New screenname", value=profile["screenname"], key="sn_input")
-        if st.button("Save", key="sn_save", use_container_width=True):
-            ok, err = db.set_screenname(profile["id"], new_name.strip())
-            if ok:
-                st.success("Screenname updated.")
-                st.rerun()
-            else:
-                st.error(err)
     if st.button("Log out", key="logout_btn", use_container_width=True):
         st.logout()
 

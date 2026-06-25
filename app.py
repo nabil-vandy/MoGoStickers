@@ -1,8 +1,10 @@
 import datetime
 import textwrap
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import streamlit as st
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 import auth
 import db
@@ -237,6 +239,22 @@ for s in stickers:
     if s["album"] not in ordered_albums:
         ordered_albums.append(s["album"])
 
+# Set numbers: rank albums by their lowest sticker id (= MoGo_ID order).
+# Sets 1-21 are the regular collection; sets 22+ are Bonus Sets, and only the
+# highest-numbered one is the "current" bonus.
+_album_min_id = {}
+for s in stickers:
+    a = s["album"]
+    if a not in _album_min_id or s["id"] < _album_min_id[a]:
+        _album_min_id[a] = s["id"]
+set_number_by_album = {
+    album: i for i, album in enumerate(
+        sorted(_album_min_id, key=lambda a: _album_min_id[a]), start=1)
+}
+REGULAR_SET_MAX = 21
+current_bonus_album = max(set_number_by_album,
+                          key=lambda a: set_number_by_album[a]) if set_number_by_album else None
+
 
 # --- Trade Calculator -------------------------------------------------------
 def find_trade_rows(stickers, pool):
@@ -309,14 +327,20 @@ def get_greeting(name):
         return f"Good evening, {name}! 🌙"
 
 
-def albums_needing_upload(stickers, user_id):
-    """Albums where the user still has an unowned sticker — the only ones worth uploading."""
-    needed = []
-    for album in ordered_albums:
-        album_stickers = [s for s in stickers if s["album"] == album]
-        if any(not db.ownership_for(s, user_id)["owned"] for s in album_stickers):
-            needed.append(album)
-    return needed
+def group_sets_needing_upload(stickers, pool):
+    """Regular sets (1-21) where ANY pool member is still missing a sticker.
+    Group-level so the upload guidance is identical for everyone — others'
+    updated extras are what the group needs to complete their albums.
+    Returns a sorted list of set numbers."""
+    member_ids = [p["id"] for p in pool] or []
+    needed = set()
+    for s in stickers:
+        num = set_number_by_album.get(s["album"])
+        if not num or num > REGULAR_SET_MAX:
+            continue
+        if any(not db.ownership_for(s, uid)["owned"] for uid in member_ids):
+            needed.add(num)
+    return sorted(needed)
 
 
 # --- Sidebar Layout ---
@@ -326,7 +350,7 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.0.2</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.1.1</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -367,8 +391,11 @@ if st.session_state.active_tab == "Dashboard":
     </div>
     """, unsafe_allow_html=True)
 
-    ready_to_send_val = sum(1 for t in trades if t["sender_id"] == my_id)
-    pending_trades_val = sum(1 for t in trades if t["recipient_id"] == my_id)
+    # Gold stickers are manual-only (🔒) and can't be sent — exclude them.
+    # Count distinct stickers, not trade rows (a duplicate can match many recipients).
+    ready_to_send_val = len({t["sticker_id"] for t in trades
+                             if t["sender_id"] == my_id and not t["gold"]})
+    pending_trades_val = len({t["sticker_id"] for t in trades if t["recipient_id"] == my_id})
     completed_val = sum(1 for s in stickers if db.ownership_for(s, my_id)["owned"])
     missing_val = sum(1 for s in stickers if not db.ownership_for(s, my_id)["owned"])
 
@@ -489,6 +516,47 @@ elif st.session_state.active_tab == "Trades":
                 time.sleep(1)
                 st.rerun()
 
+    # Expected-to-receive: what others can send YOU — so you can nudge friends.
+    incoming = [t for t in trades if t["recipient_id"] == my_id]
+    st.divider()
+    st.markdown("### 📥 Expected to receive")
+    if not incoming:
+        st.info("No incoming stickers right now — your friends don't have duplicates you need yet.")
+    else:
+        st.caption("Stickers friends can send you. Remind them to pass these along!")
+        incoming_by_sender = {}
+        for t in incoming:
+            incoming_by_sender.setdefault(t["sender_id"], []).append(t)
+        for sender_id, snd_trades in incoming_by_sender.items():
+            sp = name_by_id.get(sender_id, {})
+            s_emoji = sp.get("emoji", "👤")
+            s_color = sp.get("color", "#ffffff")
+            s_name = sp.get("screenname", "Unknown")
+            s_bg = f"{s_color}1a"
+            st.markdown(f"""
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 20px; margin-bottom: 12px;">
+                <span style="font-size: 18px;">{s_emoji}</span>
+                <span style="font-size: 16px; font-weight: bold; color: {s_color};">{s_name}</span>
+                <span style="background-color: {s_bg}; color: {s_color}; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; border: 1px solid {s_color}33;">
+                    {len(snd_trades)} stickers
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+            for trade in snd_trades:
+                stars_str = '★' * trade['stars']
+                gold_badge = ("<span style='color: #d97706; font-weight: bold; background-color: #fef3c7; "
+                              "padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;'>Gold</span>"
+                              if trade["gold"] else "")
+                st.markdown(f"""
+                <div class="trade-row-wrapper">
+                    <div class="trade-chk">📥</div>
+                    <div class="sticker-row">
+                        <div style="font-size: 14px; font-weight: bold; color: #f4f4f5;">{trade['sticker_name']} {gold_badge}<span style="color:#71717a; font-weight:normal; font-size:12px;">  {stars_str}</span></div>
+                        <div style="font-size: 12px; color: #71717a; font-style: italic;">{trade['album']}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
 # 3. UPLOAD TAB
 elif st.session_state.active_tab == "Upload":
     st.markdown("## 🔍 Upload Center")
@@ -501,19 +569,39 @@ elif st.session_state.active_tab == "Upload":
 
     # ---- Upload Screenshots ----
     if audit_mode == "Upload Screenshots":
-        needed = albums_needing_upload(stickers, my_id)
-        if needed:
-            st.markdown("#### 📋 You only need to upload these sets")
-            st.caption("Sets you've already completed are skipped — no need to screenshot them.")
-            chips = " ".join(
-                f"<span style='display:inline-block;background:#121824;border:1px solid #1e293b;"
-                f"border-radius:12px;padding:4px 10px;margin:3px;font-size:12px;'>"
-                f"{ALBUM_META.get(a, {}).get('emoji', '📁')} {a}</span>"
-                for a in needed
-            )
-            st.markdown(chips, unsafe_allow_html=True)
+        album_by_set_number = {n: a for a, n in set_number_by_album.items()}
+        needed_sets = group_sets_needing_upload(stickers, pool)
+        threshold = needed_sets[0] if needed_sets else None
+        bonus_num = set_number_by_album.get(current_bonus_album)
+
+        def _chip(num, album, bonus=False):
+            emoji = ALBUM_META.get(album, {}).get("emoji", "📁")
+            bg = "#1f2937" if bonus else "#121824"
+            border = "#f59e0b" if bonus else "#1e293b"
+            tag = "Bonus · " if bonus else ""
+            return (f"<span style='display:inline-block;background:{bg};border:1px solid {border};"
+                    f"border-radius:12px;padding:4px 10px;margin:3px;font-size:12px;'>"
+                    f"{tag}Set {num} · {emoji} {album}</span>")
+
+        if threshold is not None:
+            st.markdown(f"#### 📋 Upload all Sets {threshold}–{REGULAR_SET_MAX} + the current Bonus Set")
+        elif current_bonus_album:
+            st.markdown("#### 📋 Upload the current Bonus Set")
         else:
-            st.success("🎉 You own every sticker — nothing to upload!")
+            st.markdown("#### 📋 Nothing to upload right now")
+        st.caption("This is the whole group's shared to-do — the same for every member. "
+                   "Your updated extras are what others need to finish their albums.")
+
+        chips_html = []
+        if threshold is not None:
+            for n in range(threshold, REGULAR_SET_MAX + 1):
+                a = album_by_set_number.get(n)
+                if a:
+                    chips_html.append(_chip(n, a))
+        if current_bonus_album and bonus_num:
+            chips_html.append(_chip(bonus_num, current_bonus_album, bonus=True))
+        if chips_html:
+            st.markdown(" ".join(chips_html), unsafe_allow_html=True)
         st.markdown("<div style='margin-bottom:16px;'></div>", unsafe_allow_html=True)
 
         st.markdown("### 📸 Upload & Analyze")
@@ -530,24 +618,29 @@ elif st.session_state.active_tab == "Upload":
                                             use_container_width=True):
                 progress = st.progress(0)
                 status = st.empty()
-                review_rows = []
-                for idx, file in enumerate(uploaded_files):
-                    status.write(f"Analyzing {idx + 1} of {len(uploaded_files)}: *{file.name}*…")
-                    image_bytes = file.read()
+
+                # Read bytes on the main thread (file handles aren't thread-safe),
+                # then crop + upload + analyze each file concurrently.
+                jobs = []
+                for file in uploaded_files:
                     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    path = f"{my_id}/{ts}_{file.name}"
-                    stored = db.upload_screenshot(path, image_bytes, file.type)
-                    try:
-                        raw, detected = gemini.analyze(image_bytes, file.type, stickers)
-                    except Exception as e:
-                        st.error(f"Error analyzing {file.name}: {e}")
-                        continue
-                    upload = db.create_upload(my_id, stored, file.name, gemini.MODEL_NAME, raw)
-                    items_payload = []
+                    jobs.append({
+                        "name": file.name, "type": file.type,
+                        "bytes": file.read(),
+                        "path": f"{my_id}/{ts}_{file.name}",
+                    })
+
+                def process(job):
+                    """Crop → store → Gemini → match. Pure of st.session_state."""
+                    img_bytes, mime = gemini.crop_screenshot(job["bytes"], job["type"])
+                    stored = db.upload_screenshot(job["path"], img_bytes, mime or job["type"])
+                    raw, detected = gemini.analyze(img_bytes, mime or job["type"], stickers)
+                    upload = db.create_upload(my_id, stored, job["name"], gemini.MODEL_NAME, raw)
+                    rows, items_payload = [], []
                     for d in detected:
                         match_sticker, method = gemini.match(d["name"], stickers)
                         prev = db.ownership_for(match_sticker, my_id) if match_sticker else {"owned": False, "extras": 0}
-                        row = {
+                        rows.append({
                             "upload_id": upload["id"] if upload else None,
                             "image_path": stored,
                             "detected_name": d["name"],
@@ -560,8 +653,7 @@ elif st.session_state.active_tab == "Upload":
                             "prev_extras": prev["extras"],
                             "new_owned": d["owned"] if match_sticker else None,
                             "new_extras": d["extras"] if match_sticker else None,
-                        }
-                        review_rows.append(row)
+                        })
                         items_payload.append({
                             "upload_id": upload["id"] if upload else None,
                             "detected_name": d["name"], "detected_owned": d["owned"],
@@ -574,7 +666,28 @@ elif st.session_state.active_tab == "Upload":
                             "applied": False,
                         })
                     db.add_upload_items(items_payload)
-                    progress.progress(int(((idx + 1) / len(uploaded_files)) * 100))
+                    return rows
+
+                review_rows = []
+                ctx = get_script_run_ctx()
+                done = 0
+                total = len(jobs)
+                status.write(f"Analyzing {total} screenshot(s)…")
+                # initializer attaches the Streamlit context to each pool thread
+                # so db._request's st.error stays valid if a call fails.
+                with ThreadPoolExecutor(max_workers=min(total, 8),
+                                        initializer=add_script_run_ctx,
+                                        initargs=(None, ctx)) as ex:
+                    futures = {ex.submit(process, job): job["name"] for job in jobs}
+                    for fut in as_completed(futures):
+                        try:
+                            review_rows.extend(fut.result())
+                        except Exception as e:
+                            st.error(f"Error analyzing {futures[fut]}: {e}")
+                        done += 1
+                        progress.progress(int((done / total) * 100))
+                        status.write(f"Analyzed {done} of {total}…")
+
                 st.session_state.pending_review = review_rows
                 status.write("Analysis complete — review below.")
                 st.rerun()
@@ -582,31 +695,45 @@ elif st.session_state.active_tab == "Upload":
         # Review-before-commit panel
         if st.session_state.pending_review:
             st.markdown("### 🧐 Review before saving")
-            st.caption("Compare against the in-game '+N'. Edit any row, then confirm. "
-                       "Unmatched names are skipped.")
-            matched = [r for r in st.session_state.pending_review if r["matched_sticker_id"]]
             unmatched = [r for r in st.session_state.pending_review if not r["matched_sticker_id"]]
 
-            editable = [{
-                "Sticker": r["matched_name"],
-                "Detected as": r["detected_name"],
-                "Match": r["match_method"],
-                "Own": bool(r["new_owned"]),
-                "+N": int(r["new_extras"] or 0),
-                "Was": f"{'own' if r['prev_owned'] else '—'} +{r['prev_extras']}",
-            } for r in matched]
+            def _changed(r):
+                return (bool(r["new_owned"]) != bool(r["prev_owned"])
+                        or int(r["new_extras"] or 0) != int(r["prev_extras"] or 0))
 
-            edited = st.data_editor(
-                editable, use_container_width=True, hide_index=True, key="review_editor",
-                column_config={
-                    "Sticker": st.column_config.TextColumn(disabled=True),
-                    "Detected as": st.column_config.TextColumn(disabled=True),
-                    "Match": st.column_config.TextColumn(disabled=True),
-                    "Was": st.column_config.TextColumn(disabled=True),
-                    "Own": st.column_config.CheckboxColumn(),
-                    "+N": st.column_config.NumberColumn(min_value=0, step=1),
-                },
+            # Only show rows that differ from the previous count, ascending MoGo_ID.
+            matched = sorted(
+                (r for r in st.session_state.pending_review
+                 if r["matched_sticker_id"] and _changed(r)),
+                key=lambda r: r["matched_sticker_id"],
             )
+
+            if not matched:
+                st.info("No changes vs. your last counts — nothing to save.")
+                edited = []
+            else:
+                st.caption("Only stickers whose count changed are shown. "
+                           "Edit any row, then confirm.")
+                editable = [{
+                    "Sticker": r["matched_name"],
+                    "Detected as": r["detected_name"],
+                    "Match": r["match_method"],
+                    "Own": bool(r["new_owned"]),
+                    "+N": int(r["new_extras"] or 0),
+                    "Was": f"{'own' if r['prev_owned'] else '—'} +{r['prev_extras']}",
+                } for r in matched]
+
+                edited = st.data_editor(
+                    editable, use_container_width=True, hide_index=True, key="review_editor",
+                    column_config={
+                        "Sticker": st.column_config.TextColumn(disabled=True),
+                        "Detected as": st.column_config.TextColumn(disabled=True),
+                        "Match": st.column_config.TextColumn(disabled=True),
+                        "Was": st.column_config.TextColumn(disabled=True),
+                        "Own": st.column_config.CheckboxColumn(),
+                        "+N": st.column_config.NumberColumn(min_value=0, step=1),
+                    },
+                )
 
             if unmatched:
                 with st.expander(f"⚠️ {len(unmatched)} unmatched detection(s) — not saved"):
@@ -615,14 +742,13 @@ elif st.session_state.active_tab == "Upload":
 
             col_a, col_b = st.columns([1, 1])
             with col_a:
-                if st.button("Discard", use_container_width=True):
-                    st.session_state.pending_review = None
-                    st.rerun()
-            with col_b:
-                if st.button("✅ Confirm & Save", type="primary", use_container_width=True):
+                if st.button("✅ Confirm & Save", type="primary", use_container_width=True,
+                             disabled=not matched):
                     db.log_history(my_id, "Applied screenshot upload",
                                    db.snapshot_ownership(stickers, pool))
-                    applied = 0
+                    # Dedupe by sticker (last edit wins) — a single bulk upsert can't
+                    # touch the same row twice.
+                    by_sticker = {}
                     upload_ids = set()
                     for r, e in zip(matched, edited):
                         new_owned = bool(e["Own"])
@@ -630,15 +756,20 @@ elif st.session_state.active_tab == "Upload":
                         # Safeguard: don't silently un-own a known sticker.
                         if r["prev_owned"] and not new_owned:
                             new_owned = True
-                        db.upsert_ownership(my_id, r["matched_sticker_id"], new_owned, new_extras)
+                        by_sticker[r["matched_sticker_id"]] = {
+                            "user_id": my_id, "sticker_id": r["matched_sticker_id"],
+                            "owned": new_owned, "extras": new_extras,
+                        }
                         if r["upload_id"]:
                             upload_ids.add(r["upload_id"])
-                        applied += 1
-                    for uid in upload_ids:
-                        db.set_upload_status(uid, "applied")
+                    db.upsert_ownership_bulk(by_sticker.values())
+                    db.set_upload_status_bulk(upload_ids, "applied")
                     st.session_state.pending_review = None
-                    st.success(f"Saved {applied} sticker update(s)!")
-                    time.sleep(1)
+                    st.success(f"Saved {len(by_sticker)} sticker update(s)!")
+                    st.rerun()
+            with col_b:
+                if st.button("Discard", use_container_width=True):
+                    st.session_state.pending_review = None
                     st.rerun()
 
     # ---- Review Last Upload ----
@@ -862,6 +993,49 @@ elif st.session_state.active_tab == "Admin":
                     st.rerun()
 
     st.divider()
+    st.markdown("### 👥 Manage players")
+    st.caption("Select any player to view and edit their access.")
+    all_profiles = db.list_all_profiles()
+    if not all_profiles:
+        st.info("No players yet.")
+    else:
+        by_id = {p["id"]: p for p in all_profiles}
+        sel_id = st.selectbox(
+            "Player", options=[p["id"] for p in all_profiles],
+            format_func=lambda pid: f"{by_id[pid].get('emoji', '👤')} {by_id[pid]['screenname']} "
+                                    f"({by_id[pid].get('email') or 'no email'})",
+            key="admin_player_select",
+        )
+        sel = by_id[sel_id]
+        with st.form(f"manage_player_{sel_id}"):
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                m_sn = st.text_input("Screenname", value=sel["screenname"])
+            with c2:
+                m_emoji = st.text_input("Emoji", value=sel.get("emoji") or "👤")
+            m_color = st.color_picker("Color", value=sel.get("color") or "#93c5fd")
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                m_admin = st.checkbox("Admin", value=bool(sel.get("is_admin")))
+            with cc2:
+                m_approved = st.checkbox("Approved", value=bool(sel.get("approved")))
+            saved = st.form_submit_button("Save changes", type="primary",
+                                          use_container_width=True)
+            if saved:
+                if not m_sn.strip():
+                    st.error("Screenname can't be empty.")
+                else:
+                    res = db.update_profile(
+                        sel_id, screenname=m_sn.strip(), emoji=m_emoji.strip() or "👤",
+                        color=m_color, is_admin=m_admin, approved=m_approved,
+                    )
+                    if res is not None:
+                        st.success(f"Updated {m_sn.strip()}.")
+                        st.rerun()
+                    else:
+                        st.error("Update failed (screenname may be taken).")
+
+    st.divider()
     st.markdown("### ✉️ Create an invite")
     st.caption("Set the screenname now; it's pre-filled when they sign in.")
     with st.form("invite_form"):
@@ -897,6 +1071,6 @@ elif st.session_state.active_tab == "Admin":
 st.divider()
 st.markdown(
     "<div style='text-align: center; color: #71717a; font-size: 12px; padding: 8px 0;'>"
-    "Monopoly GO! Sticker Share · v3.0.2</div>",
+    "Monopoly GO! Sticker Share · v3.1.1</div>",
     unsafe_allow_html=True,
 )

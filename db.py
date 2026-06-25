@@ -97,6 +97,11 @@ def list_pending_profiles():
     return _request("profiles?approved=eq.false&select=*&order=created_at.asc") or []
 
 
+def list_all_profiles():
+    """Every profile (approved or not) — for admin player management."""
+    return _request("profiles?select=*&order=screenname.asc") or []
+
+
 def create_profile(email, screenname, real_name=None, emoji="👤",
                    color="#93c5fd", is_admin=False, approved=False):
     payload = {
@@ -155,6 +160,7 @@ def claim_invite(invite, email):
 def fetch_stickers():
     data = _request(
         "stickers?select=id,name,stars,is_gold,album,ownership(user_id,owned,extras)"
+        "&order=id.asc"
     )
     if not data:
         return []
@@ -180,6 +186,19 @@ def upsert_ownership(user_id, sticker_id, owned, extras):
     _invalidate_sticker_cache()
     payload = {"user_id": user_id, "sticker_id": sticker_id,
                "owned": bool(owned), "extras": int(extras), "updated_at": _now()}
+    return _request("ownership?on_conflict=user_id,sticker_id", method="POST",
+                    payload=payload, prefer="resolution=merge-duplicates,return=minimal")
+
+
+def upsert_ownership_bulk(rows):
+    """Upsert many ownership rows in a single request.
+    rows: iterable of {"user_id", "sticker_id", "owned", "extras"}."""
+    payload = [{"user_id": r["user_id"], "sticker_id": r["sticker_id"],
+                "owned": bool(r["owned"]), "extras": int(r["extras"] or 0),
+                "updated_at": _now()} for r in rows]
+    if not payload:
+        return []
+    _invalidate_sticker_cache()
     return _request("ownership?on_conflict=user_id,sticker_id", method="POST",
                     payload=payload, prefer="resolution=merge-duplicates,return=minimal")
 
@@ -238,6 +257,14 @@ def add_upload_items(items):
 
 def set_upload_status(upload_id, status):
     _request(f"uploads?id=eq.{upload_id}", method="PATCH", payload={"status": status})
+
+
+def set_upload_status_bulk(upload_ids, status):
+    ids = [str(i) for i in upload_ids if i is not None]
+    if not ids:
+        return
+    _request(f"uploads?id=in.({','.join(ids)})", method="PATCH",
+             payload={"status": status})
 
 
 def latest_uploads(user_id, limit=20):
