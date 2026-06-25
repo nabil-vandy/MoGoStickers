@@ -15,6 +15,20 @@ all unseen entries are shown together as a single combined set.
 # Newest first. Bump this list (and app version) when shipping user-facing changes.
 CHANGELOG = [
     {
+        "id": "3.3.0",
+        "version": "3.3.0",
+        "date": "2026-06-24",
+        "changes": [
+            "Gold stickers are now fully accounted for in trades. They can't be "
+            "sent or received through the normal flow (gold is a manual-only "
+            "trade), so they show a 🔒 on both the \"Send to friends\" and "
+            "\"Expected to receive\" lists.",
+            "The Dashboard \"Pending Trades\" count now reflects only the "
+            "stickers you can actually receive automatically — gold is no longer "
+            "counted, so the number matches what friends can really send you.",
+        ],
+    },
+    {
         "id": "3.2.0",
         "version": "3.2.0",
         "date": "2026-06-24",
