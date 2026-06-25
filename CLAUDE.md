@@ -8,9 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 make setup    # install dependencies into .venv
 make syntax   # compile-check app.py only
 make run      # streamlit run app.py (uses .venv/bin/python if present)
+
+# compile-check all source files
+python -m py_compile app.py db.py auth.py gemini.py
 ```
 
-**Preview** (Claude Code desktop): uses `.claude/launch.json` + `.claude/run_app.sh`. The preview sandbox blocks `os.getcwd()` and file access to `~/Documents`, so the launcher copies app files to `/tmp/mogostickers/` and monkey-patches the blocked syscalls. After editing source files, resync the copy before reloading the preview:
+**Preview** (Claude Code desktop): uses `.claude/launch.json` + a launcher that copies app files to `/tmp/mogostickers/` and monkey-patches syscalls blocked by the preview sandbox (`os.getcwd()`, file access to `~/Documents`). After editing source files, resync the copy before reloading the preview:
 
 ```bash
 cp app.py db.py auth.py gemini.py /tmp/mogostickers/
@@ -27,19 +30,51 @@ Four Python files; no framework besides Streamlit.
 | `app.py` | All UI (tabs, widgets, event handlers). Auth gate runs at the top, then the full page renders per `st.session_state.active_tab`. |
 | `db.py` | Supabase REST + Storage calls via `urllib`. No ORM. Uses the **service-role key** (bypasses RLS). |
 | `auth.py` | Streamlit-native OIDC gate (`st.login`/`st.user`/`st.logout`). Handles invite-claiming and pending-approval screens. |
-| `gemini.py` | Screenshot analysis: sends image + reference JSON → Pydantic schema → name matching (`difflib`). |
+| `gemini.py` | Screenshot analysis: crop → send image + reference JSON → Pydantic schema → name matching (`difflib`). |
 
 `app.py` imports `auth`, `db`, `gemini`; the other three are self-contained.
+
+### Navigation & page flow
+
+`app.py` is one top-to-bottom script — there is no router. After the auth gate, a sidebar renders nav buttons and the page body is a single `if/elif` chain on `st.session_state.active_tab`. The active tab is also mirrored to the `?tab=` query param so links and deep-links work. `TABS = ["Dashboard", "Trades", "Upload", "Manifest"]` (+ `"Admin"` when `current_user["is_admin"]`); the list order **is** the on-screen order, and `tab_icons` maps each to its emoji.
+
+| Tab | Renders |
+|-----|---------|
+| **📊 Dashboard** | Greeting + four metric cards (ready-to-send, pending, completed, missing). Cards are `<a href="/?tab=...">` deep-links. "Ready to Send" counts distinct **non-gold** stickers only. |
+| **⚡ Trades** | `find_trade_rows(stickers, pool)` output grouped by recipient; checkboxes apply trades. Gold stickers render a 🔒 (manual-only). A read-only "📥 Expected to receive" section at the bottom lists what friends can send *you*. |
+| **🔍 Upload** ("Upload Center") | `st.radio` sub-tabs: **Upload Screenshots** (parallel analyze → changed-only review panel → batch commit), **Review Last Upload** (durable per-upload audit), **Manual Edit** (per-user owned/extras editor with Undo / Confirm & Commit). |
+| **📁 Manifest** | Read-only ownership grid across all pool members, one expander per album. No editing here. |
+| **🛠️ Admin** | Pending approvals + **👥 Manage players** dropdown (edit any player's screenname/emoji/color/admin/approved) + invite creation. |
+
+Editing your own counts lives **only** in Upload → Manual Edit. The Manifest tab is view-only. When adding a tab, update `TABS`, `tab_icons`, and add the matching `elif` block.
+
+### Upload flow (v3.1.1)
+
+Screenshots are processed in parallel via `ThreadPoolExecutor` (up to 8 workers). Each worker:
+1. Calls `gemini.crop_screenshot(bytes, mime)` — strips top 9% / bottom 15% (game UI chrome)
+2. Uploads the cropped bytes to Supabase Storage (`db.upload_screenshot`)
+3. Calls `gemini.analyze` (Gemini API, one call per image)
+4. Runs `gemini.match` for each detected sticker (local fuzzy match, safe to call from threads)
+
+Workers return their rows to the main thread; never touch `st.session_state`. The Streamlit script context is attached to worker threads via `add_script_run_ctx` so `st.error` stays valid inside `db._request`.
+
+The review panel shows **only rows whose count changed** vs. the previous upload, sorted ascending by `matched_sticker_id` (MoGo_ID order). Commit uses `db.upsert_ownership_bulk` (single HTTP POST array) instead of one call per sticker.
+
+### Set numbering
+
+Albums are numbered 1–N by their lowest sticker id (`set_number_by_album` dict, built at startup in `app.py`). Sets 1–21 are the regular collection (`REGULAR_SET_MAX = 21`); sets 22+ are Bonus Sets, and only the one with the highest number (`current_bonus_album`) is treated as the "current" bonus. The Upload heading is group-wide (`group_sets_needing_upload` checks all pool members, not just the current user) so it reads the same for everyone.
 
 ## Data Model
 
 **Ownership** is `(user_id uuid, sticker_id bigint, owned bool, extras int)` with `UNIQUE(user_id, sticker_id)`. `owned` = has the sticker; `extras` = the in-game "+N" badge. Total = `db.total_for(owned, extras)` = `(1 + extras) if owned else 0`. Never store or derive a raw total.
 
-**Profiles** hold `(id, email, screenname, emoji, color, is_admin, approved)`. The `screenname` is the sole display identity across all UI — email is only for login matching, never shown.
+**Profiles** hold `(id, email, screenname, emoji, color, is_admin, approved)`. The `screenname` is the sole display identity across all UI — email is only for login matching, never shown. Screennames are managed by admins via the Admin tab; there is no self-serve rename for regular users.
 
-**Upload flow**: analyze → store raw JSON in `uploads.raw_response` + per-sticker rows in `upload_items` → show `st.data_editor` review panel → only write `ownership` on Confirm. Never write on analyze.
+**Upload flow**: analyze → store raw JSON in `uploads.raw_response` + per-sticker rows in `upload_items` → show `st.data_editor` review panel (changed rows only) → only write `ownership` on Confirm. Never write on analyze.
 
 **Database tables**: `stickers`, `profiles`, `invites`, `ownership`, `uploads`, `upload_items`, `database_history`. Screenshots persist in the private Supabase Storage bucket `screenshots/`.
+
+`database_history`: every ownership-mutating action (trades, manual edits, upload commits) first calls `db.log_history(...)` to snapshot state. The user-facing History & Rollbacks UI was removed in v3.0.2, so `db.fetch_history()` / `db.apply_rollback()` still exist but are currently unreferenced.
 
 `ownership_legacy` still exists in the DB (renamed from `ownership` during migration 001). Drop it only after verifying sticker totals in the live app, then run `migrations/002_drop_legacy.sql`.
 
@@ -48,10 +83,11 @@ Four Python files; no framework besides Streamlit.
 - A user may only write `ownership` rows where `user_id == current_user["id"]`.
 - Never silently flip `owned=True → False` during an upload review; require explicit user action.
 - `gemini.py` reports the "+N" badge directly as `extras`; the prompt must not say "convert to a total."
-- `db.py` uses `urllib` (stdlib only) — no `requests`/`httpx`.
-- Stickers cache lives in `st.session_state.stickers_cache`; call `db._invalidate_sticker_cache()` after any ownership write.
-- Gold stickers show a 🔒 in the Trades tab (not checkboxable — manual trade only).
+- `db.py` uses `urllib` (stdlib only) — no `requests`/`httpx`. Each `_request()` call opens a fresh connection (no pooling).
+- Stickers cache lives in `st.session_state.stickers_cache`; call `db._invalidate_sticker_cache()` after any ownership write. The bulk helper `db.upsert_ownership_bulk` does this once for the whole batch.
+- Gold stickers show a 🔒 in the Trades tab (not checkboxable — manual trade only) and are excluded from the "Ready to Send" dashboard count.
 - Recipients need ≥ 10 owned stickers before they appear as trade targets (cuts noise for new users).
+- Upload workers must not touch `st.session_state` — collect results and merge on the main thread only.
 
 ## Secrets / Config
 
@@ -65,10 +101,16 @@ Required keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `GEMINI_API_KEY`. Optiona
 
 ## Deployment
 
-Auto-deploys from GitHub `nabil-vandy/MoGoStickers` (branch `main`) to https://mogostickers.streamlit.app/ via Streamlit Cloud. Push to `main` to deploy.
+Auto-deploys from GitHub `nabil-vandy/MoGoStickers` (branch `main`) to https://mogostickers.streamlit.app/ via Streamlit Cloud. Push to `main` to deploy. Current version: **v3.1.1**.
 
 ## Migration
 
-Schema migrations live in `migrations/`. Run order: `001_normalize_and_auth.sql` (in the Supabase SQL editor) → `scripts/migrate_ownership.py --apply` → `002_drop_legacy.sql`. Never run on prod without testing on a Supabase branch first.
+Schema migrations live in `migrations/`. Run order:
+1. `001_normalize_and_auth.sql` — in the Supabase SQL editor
+2. `scripts/migrate_ownership.py --apply` — seeds profiles + copies data from the legacy table
+3. `002_drop_legacy.sql` — only after verifying sticker totals on the live app
+4. `003_history_user_profile_nullable.sql` — makes `database_history.user_profile` nullable (required for `log_history()` which no longer writes that column)
+
+Never run on prod without testing on a Supabase branch first.
 
 A pre-go-live DB snapshot lives in `backups/20260622-191721-prelive/` with a `restore.py` script. Git tag `prelive-savepoint-20260622` marks the code at that point.
