@@ -16,7 +16,7 @@ python -m py_compile app.py db.py auth.py gemini.py
 **Preview** (Claude Code desktop): uses `.claude/launch.json` + a launcher that copies app files to `/tmp/mogostickers/` and monkey-patches syscalls blocked by the preview sandbox (`os.getcwd()`, file access to `~/Documents`). After editing source files, resync the copy before reloading the preview:
 
 ```bash
-cp app.py db.py auth.py gemini.py /tmp/mogostickers/
+cp app.py db.py auth.py gemini.py changelog.py /tmp/mogostickers/
 ```
 
 Note: the Claude preview cannot complete Google OIDC login (sandbox blocks the OAuth redirect). Use the live site at https://mogostickers.streamlit.app/ for end-to-end auth testing.
@@ -41,12 +41,20 @@ Four Python files; no framework besides Streamlit.
 | Tab | Renders |
 |-----|---------|
 | **📊 Dashboard** | Greeting + four metric cards (ready-to-send, pending, completed, missing). Cards are `<a href="/?tab=...">` deep-links. "Ready to Send" counts distinct **non-gold** stickers only. |
-| **⚡ Trades** | `find_trade_rows(stickers, pool)` output grouped by recipient; checkboxes apply trades. Gold stickers render a 🔒 (manual-only). A read-only "📥 Expected to receive" section at the bottom lists what friends can send *you*. |
+| **⚡ Trades** ("Trade Center") | `find_trade_rows(stickers, pool)` output. **👯 Send to friends** is grouped by recipient (checkboxes → Mark Selected; gold renders a 🔒, manual-only). **📥 Expected to receive** lists what friends can send *you*, each with a checkbox → **✅ Mark received**, which sets *your* ownership to owned (extras unchanged) so you drop off every sender's list. Senders' counts are intentionally left alone — they self-correct on their next upload. |
 | **🔍 Upload** ("Upload Center") | `st.radio` sub-tabs: **Upload Screenshots** (parallel analyze → changed-only review panel → batch commit), **Review Last Upload** (durable per-upload audit), **Manual Edit** (per-user owned/extras editor with Undo / Confirm & Commit). |
 | **📁 Manifest** | Read-only ownership grid across all pool members, one expander per album. No editing here. |
-| **🛠️ Admin** | Pending approvals + **👥 Manage players** dropdown (edit any player's screenname/emoji/color/admin/approved) + invite creation. |
+| **🛠️ Admin** | Pending approvals + invite creation only. (Per-player profile editing was removed in v3.2.0.) |
 
-Editing your own counts lives **only** in Upload → Manual Edit. The Manifest tab is view-only. When adding a tab, update `TABS`, `tab_icons`, and add the matching `elif` block.
+Editing your own counts lives **only** in Upload → Manual Edit. The Manifest tab is view-only. When adding a tab, update `TABS`, `tab_icons`, and add the matching `elif` block. Page titles use the shared `page_header(title, subtitle)` helper so every tab's header matches.
+
+### Identity: real vs. acting user (v3.2.0)
+
+`real_user` (= `auth.require_auth()`) is always the logged-in account — it drives Admin-tab access and the changelog popup. The **acting** identity (`my_id` / `my_name`) is normally the same, but an admin can impersonate any player via the sidebar **"Viewing as"** switcher (`st.session_state.act_as_id`). When impersonating, `my_id` is the selected player and **all reads and writes** (dashboard, trades, manual edits, uploads, Review Last Upload) act on that player's account; a 🔭 banner shows at the top. Impersonation is honored only when `real_user["is_admin"]`. `my_id`/`my_name` are assigned **after** the sidebar renders (the switcher sets them).
+
+### Changelog popup (v3.2.0)
+
+`changelog.py` holds a newest-first list of releases (the only reliable source — Streamlit Cloud has no git). On load, if `changelog.entries_since(real_user["last_seen_changelog"])` is non-empty, a `@st.dialog` "What's new" modal shows the combined unseen changes; **Got it** calls `db.mark_changelog_seen(real_id, changelog.latest_id())`. Dismissal persists per-user (profiles column `last_seen_changelog`, migration 004) until a newer entry ships. Brand-new accounts (no marker) are silently marked caught-up. The popup is keyed to `real_user`, never the impersonated one. Bump `changelog.CHANGELOG` + the app version when shipping user-facing changes.
 
 ### Upload flow (v3.1.1)
 
@@ -101,7 +109,7 @@ Required keys: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `GEMINI_API_KEY`. Optiona
 
 ## Deployment
 
-Auto-deploys from GitHub `nabil-vandy/MoGoStickers` (branch `main`) to https://mogostickers.streamlit.app/ via Streamlit Cloud. Push to `main` to deploy. Current version: **v3.1.1**.
+Auto-deploys from GitHub `nabil-vandy/MoGoStickers` (branch `main`) to https://mogostickers.streamlit.app/ via Streamlit Cloud. Push to `main` to deploy. Current version: **v3.2.0**.
 
 ## Migration
 
@@ -110,6 +118,7 @@ Schema migrations live in `migrations/`. Run order:
 2. `scripts/migrate_ownership.py --apply` — seeds profiles + copies data from the legacy table
 3. `002_drop_legacy.sql` — only after verifying sticker totals on the live app
 4. `003_history_user_profile_nullable.sql` — makes `database_history.user_profile` nullable (required for `log_history()` which no longer writes that column)
+5. `004_profile_last_seen_changelog.sql` — adds `profiles.last_seen_changelog` (text) for the changelog popup. Run before v3.2.0 traffic, or `db.mark_changelog_seen()` PATCHes fail-soft and the popup reappears each load.
 
 Never run on prod without testing on a Supabase branch first.
 

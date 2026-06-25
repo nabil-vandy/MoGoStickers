@@ -7,6 +7,7 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 import auth
+import changelog
 import db
 import gemini
 
@@ -150,11 +151,13 @@ st.markdown("""
         width: 100%;
     }
     .trade-row-wrapper .trade-chk {
-        flex: 0 0 auto;
+        flex: 0 0 28px;
+        width: 28px;
         display: flex;
         align-items: center;
         justify-content: center;
-        min-width: 28px;
+        font-size: 18px;
+        text-align: center;
     }
     .trade-row-wrapper .sticker-row {
         flex: 1 1 0%;
@@ -207,13 +210,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Authentication gate ---
-current_user = auth.require_auth()
-my_id = current_user["id"]
-my_name = current_user["screenname"]
+# `real_user` is always the logged-in account (drives Admin access + the changelog
+# popup). `my_id` / `my_name` are the *acting* identity and may be an impersonated
+# player when an admin uses the sidebar "Viewing as" switcher — they're assigned
+# after the sidebar renders, below.
+real_user = auth.require_auth()
+real_id = real_user["id"]
+is_admin = bool(real_user.get("is_admin"))
 
 # --- Session State Initialization ---
 TABS = ["Dashboard", "Trades", "Upload", "Manifest"]
-if current_user.get("is_admin"):
+if is_admin:
     TABS.append("Admin")
 
 url_tab = st.query_params.get("tab")
@@ -327,6 +334,19 @@ def get_greeting(name):
         return f"Good evening, {name}! 🌙"
 
 
+def page_header(title, subtitle=""):
+    """Consistent page title bar used at the top of every tab — one font, size,
+    weight and divider so the pages read the same."""
+    sub = (f"<span style='font-size: 13px; color: #71717a;'>{subtitle}</span>"
+           if subtitle else "")
+    st.markdown(f"""
+    <div style="display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 8px; width: 100%;">
+        <span style="font-size: 22px; font-weight: 800; color: #f4f4f5;">{title}</span>
+        {sub}
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def group_sets_needing_upload(stickers, pool):
     """Regular sets (1-21) where ANY pool member is still missing a sticker.
     Group-level so the upload guidance is identical for everyone — others'
@@ -350,7 +370,7 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.1.1</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.2.0</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -368,7 +388,30 @@ with st.sidebar:
 
     st.markdown("<div style='margin: 20px 0; border-top: 1px solid #1e293b;'></div>", unsafe_allow_html=True)
 
-    auth.render_account_controls(current_user)
+    auth.render_account_controls(real_user)
+
+    # Admin "act-as" switcher: view & manage any player's account. Defaults to the
+    # admin themselves; the choice is honored below only because is_admin is True.
+    if is_admin:
+        switch_profiles = db.list_all_profiles()
+        switch_by_id = {p["id"]: p for p in switch_profiles}
+        switch_ids = [real_id] + [p["id"] for p in switch_profiles if p["id"] != real_id]
+        if st.session_state.get("act_as_id") not in switch_ids:
+            st.session_state.act_as_id = real_id
+        st.markdown(
+            "<div style='font-size:11px;font-weight:bold;color:#71717a;text-transform:uppercase;"
+            "letter-spacing:.05em;margin:14px 0 6px;'>Viewing as</div>",
+            unsafe_allow_html=True,
+        )
+
+        def _switch_label(pid):
+            if pid == real_id:
+                return f"{real_user.get('emoji', '👤')} {real_user['screenname']} (me)"
+            p = switch_by_id.get(pid, {})
+            return f"{p.get('emoji', '👤')} {p.get('screenname', 'Unknown')}"
+
+        st.selectbox("Viewing as", options=switch_ids, format_func=_switch_label,
+                     key="act_as_id", label_visibility="collapsed")
 
     st.markdown("""
     <div style='background-color: rgba(234, 179, 8, 0.05); border: 1px solid rgba(234, 179, 8, 0.15); border-left: 4px solid #eab308; padding: 12px; border-radius: 8px; margin-top: 40px;'>
@@ -380,16 +423,65 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
+# --- Resolve acting identity (impersonation) -------------------------------
+# Only admins can act-as; everyone else is always themselves. The selected player
+# may be unapproved (and thus not in `pool`), so resolve from list_all_profiles.
+acting_user = real_user
+if is_admin and st.session_state.get("act_as_id") and st.session_state.act_as_id != real_id:
+    # `switch_by_id` is built in the sidebar above whenever is_admin is True.
+    acting_user = switch_by_id.get(st.session_state.act_as_id, real_user)
+my_id = acting_user["id"]
+my_name = acting_user["screenname"]
+impersonating = my_id != real_id
+
+if impersonating:
+    st.markdown(
+        f"<div style='background-color: rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.3);"
+        f"border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:13px; color:#93c5fd;'>"
+        f"🔭 Viewing as <b>{acting_user.get('emoji','👤')} {my_name}</b> — changes you make save to "
+        f"their account. <span style='color:#71717a;'>Switch back to yourself in the sidebar.</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+# --- Welcome-back changelog popup (keyed to the real logged-in user) ---------
+# Gate on the column existing: PostgREST `select=*` only returns the key once
+# migration 004 has run, so the feature stays fully dormant (no popup, no writes,
+# no error toasts) until the schema is ready.
+_changelog_ready = "last_seen_changelog" in real_user
+_unseen = changelog.entries_since(real_user.get("last_seen_changelog")) if _changelog_ready else []
+if (_unseen and not impersonating
+        and not st.session_state.get("changelog_dismissed")):
+    # Brand-new accounts (no marker) start caught-up so they don't see old history.
+    if not real_user.get("last_seen_changelog"):
+        db.mark_changelog_seen(real_id, changelog.latest_id())
+        st.session_state.changelog_dismissed = True
+    else:
+        @st.dialog("✨ What's new")
+        def _changelog_dialog():
+            st.markdown(
+                f"### Welcome back, {real_user['screenname']}!\n"
+                f"The app has updated to **v{changelog.latest_id()}**. "
+                "Here's what changed since your last visit:"
+            )
+            for entry in _unseen:
+                st.markdown(f"**v{entry['version']}** · {entry['date']}")
+                for line in entry["changes"]:
+                    st.markdown(f"- {line}")
+                st.markdown("")
+            if st.button("Got it!", type="primary", use_container_width=True):
+                db.mark_changelog_seen(real_id, changelog.latest_id())
+                st.session_state.changelog_dismissed = True
+                st.rerun()
+
+        _changelog_dialog()
+
+
 # --- Main App Views ---
 
 # 1. DASHBOARD TAB
 if st.session_state.active_tab == "Dashboard":
-    st.markdown(f"""
-    <div style="display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 8px; width: 100%;">
-        <span style="font-size: 22px; font-weight: 800; color: #f4f4f5;">{get_greeting(my_name)}</span>
-        <span style="font-size: 13px; color: #71717a;">Dashboard Overview</span>
-    </div>
-    """, unsafe_allow_html=True)
+    page_header(get_greeting(my_name), "Dashboard Overview")
 
     # Gold stickers are manual-only (🔒) and can't be sent — exclude them.
     # Count distinct stickers, not trade rows (a duplicate can match many recipients).
@@ -438,16 +530,12 @@ if st.session_state.active_tab == "Dashboard":
 
 # 2. TRADES TAB
 elif st.session_state.active_tab == "Trades":
-    st.markdown(f"""
-    <div style="display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 8px; width: 100%;">
-        <span style="font-size: 22px; font-weight: 800; color: #f4f4f5;">{get_greeting(my_name)}</span>
-        <span style="font-size: 13px; color: #71717a;">Here's your trading overview.</span>
-    </div>
-    """, unsafe_allow_html=True)
+    page_header("⚡ Trade Center", "Send & receive stickers")
 
     name_by_id = {p["id"]: p for p in pool}
     my_trades = [t for t in trades if t["sender_id"] == my_id]
 
+    st.markdown("### 👯 Send to friends")
     if not my_trades:
         st.info("You don't have any tradeable duplicates to send!")
     else:
@@ -516,17 +604,23 @@ elif st.session_state.active_tab == "Trades":
                 time.sleep(1)
                 st.rerun()
 
-    # Expected-to-receive: what others can send YOU — so you can nudge friends.
+    # Expected-to-receive: what others can send YOU. Mark a sticker as received the
+    # moment a friend hands it over — that records it as owned on your account, which
+    # instantly drops you off everyone's send list so no one re-sends it. (Uploading a
+    # screenshot does the same thing automatically.)
     incoming = [t for t in trades if t["recipient_id"] == my_id]
     st.divider()
     st.markdown("### 📥 Expected to receive")
     if not incoming:
         st.info("No incoming stickers right now — your friends don't have duplicates you need yet.")
     else:
-        st.caption("Stickers friends can send you. Remind them to pass these along!")
+        st.caption("Tick a sticker once a friend sends it to you, then **Mark received** — "
+                   "it'll drop off everyone's send list so no one passes it twice.")
         incoming_by_sender = {}
         for t in incoming:
             incoming_by_sender.setdefault(t["sender_id"], []).append(t)
+
+        received_sticker_ids = set()
         for sender_id, snd_trades in incoming_by_sender.items():
             sp = name_by_id.get(sender_id, {})
             s_emoji = sp.get("emoji", "👤")
@@ -544,22 +638,41 @@ elif st.session_state.active_tab == "Trades":
             """, unsafe_allow_html=True)
             for trade in snd_trades:
                 stars_str = '★' * trade['stars']
-                gold_badge = ("<span style='color: #d97706; font-weight: bold; background-color: #fef3c7; "
-                              "padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;'>Gold</span>"
-                              if trade["gold"] else "")
-                st.markdown(f"""
-                <div class="trade-row-wrapper">
-                    <div class="trade-chk">📥</div>
-                    <div class="sticker-row">
-                        <div style="font-size: 14px; font-weight: bold; color: #f4f4f5;">{trade['sticker_name']} {gold_badge}<span style="color:#71717a; font-weight:normal; font-size:12px;">  {stars_str}</span></div>
-                        <div style="font-size: 12px; color: #71717a; font-style: italic;">{trade['album']}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                gold_tag = " (Gold)" if trade["gold"] else ""
+                rec_key = f"recv_chk_{trade['sticker_id']}_{sender_id}"
+                if st.checkbox(
+                        f"{trade['sticker_name']}{gold_tag}  {stars_str}  —  {trade['album']}",
+                        key=rec_key):
+                    received_sticker_ids.add(trade["sticker_id"])
+
+        st.markdown("<div style='margin-top: 16px;'></div>", unsafe_allow_html=True)
+        recv_info, recv_btn = st.columns([4, 1])
+        with recv_info:
+            st.markdown(
+                f"<div style='font-size: 14px; color: #a1a1aa; padding-top: 8px;'>"
+                f"{len(received_sticker_ids)} selected</div>",
+                unsafe_allow_html=True)
+        with recv_btn:
+            if st.button("✅ Mark received", type="primary", use_container_width=True,
+                         disabled=not received_sticker_ids):
+                db.log_history(my_id, f"Marked {len(received_sticker_ids)} sticker(s) received",
+                               db.snapshot_ownership(stickers, pool))
+                rows = []
+                for sid in received_sticker_ids:
+                    s = next(s for s in stickers if s["id"] == sid)
+                    mine = db.ownership_for(s, my_id)
+                    # Set owned; leave my extras as-is. Senders' counts are untouched —
+                    # they self-correct when they next reupload.
+                    rows.append({"user_id": my_id, "sticker_id": sid,
+                                 "owned": True, "extras": mine["extras"]})
+                db.upsert_ownership_bulk(rows)
+                st.success(f"Marked {len(received_sticker_ids)} sticker(s) as received!")
+                time.sleep(1)
+                st.rerun()
 
 # 3. UPLOAD TAB
 elif st.session_state.active_tab == "Upload":
-    st.markdown("## 🔍 Upload Center")
+    page_header("🔍 Upload Center", "Analyze, review & edit your counts")
     st.markdown("Upload screenshots, review what the analysis found, and edit **your** counts manually.")
 
     audit_mode = st.radio("Choose Upload Sub-tab",
@@ -584,11 +697,11 @@ elif st.session_state.active_tab == "Upload":
                     f"{tag}Set {num} · {emoji} {album}</span>")
 
         if threshold is not None:
-            st.markdown(f"#### 📋 Upload all Sets {threshold}–{REGULAR_SET_MAX} + the current Bonus Set")
+            st.markdown(f"### 📋 Upload all Sets {threshold}–{REGULAR_SET_MAX} + the current Bonus Set")
         elif current_bonus_album:
-            st.markdown("#### 📋 Upload the current Bonus Set")
+            st.markdown("### 📋 Upload the current Bonus Set")
         else:
-            st.markdown("#### 📋 Nothing to upload right now")
+            st.markdown("### 📋 Nothing to upload right now")
         st.caption("This is the whole group's shared to-do — the same for every member. "
                    "Your updated extras are what others need to finish their albums.")
 
@@ -909,7 +1022,7 @@ elif st.session_state.active_tab == "Manifest":
         album_progress[album] = {"owned": owned_count, "total": total,
                                  "pct": int((owned_count / total) * 100)}
 
-    st.markdown("## 📁 Manifest")
+    page_header("📁 Manifest", "Ownership across every member")
     st.markdown("Browse all albums and view ownership across every member.")
     st.markdown("<div style='margin-bottom: 24px;'></div>", unsafe_allow_html=True)
 
@@ -969,7 +1082,7 @@ elif st.session_state.active_tab == "Manifest":
 
 # 5. ADMIN TAB
 elif st.session_state.active_tab == "Admin":
-    st.markdown("## 🛠️ Admin")
+    page_header("🛠️ Admin", "Approvals & invites")
     st.markdown("Approve new members and create invites.")
 
     st.markdown("### ⏳ Pending approvals")
@@ -991,49 +1104,6 @@ elif st.session_state.active_tab == "Admin":
                     db.update_profile(p["id"], approved=True)
                     st.success(f"Approved {new_sn.strip() or p['screenname']}.")
                     st.rerun()
-
-    st.divider()
-    st.markdown("### 👥 Manage players")
-    st.caption("Select any player to view and edit their access.")
-    all_profiles = db.list_all_profiles()
-    if not all_profiles:
-        st.info("No players yet.")
-    else:
-        by_id = {p["id"]: p for p in all_profiles}
-        sel_id = st.selectbox(
-            "Player", options=[p["id"] for p in all_profiles],
-            format_func=lambda pid: f"{by_id[pid].get('emoji', '👤')} {by_id[pid]['screenname']} "
-                                    f"({by_id[pid].get('email') or 'no email'})",
-            key="admin_player_select",
-        )
-        sel = by_id[sel_id]
-        with st.form(f"manage_player_{sel_id}"):
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                m_sn = st.text_input("Screenname", value=sel["screenname"])
-            with c2:
-                m_emoji = st.text_input("Emoji", value=sel.get("emoji") or "👤")
-            m_color = st.color_picker("Color", value=sel.get("color") or "#93c5fd")
-            cc1, cc2 = st.columns(2)
-            with cc1:
-                m_admin = st.checkbox("Admin", value=bool(sel.get("is_admin")))
-            with cc2:
-                m_approved = st.checkbox("Approved", value=bool(sel.get("approved")))
-            saved = st.form_submit_button("Save changes", type="primary",
-                                          use_container_width=True)
-            if saved:
-                if not m_sn.strip():
-                    st.error("Screenname can't be empty.")
-                else:
-                    res = db.update_profile(
-                        sel_id, screenname=m_sn.strip(), emoji=m_emoji.strip() or "👤",
-                        color=m_color, is_admin=m_admin, approved=m_approved,
-                    )
-                    if res is not None:
-                        st.success(f"Updated {m_sn.strip()}.")
-                        st.rerun()
-                    else:
-                        st.error("Update failed (screenname may be taken).")
 
     st.divider()
     st.markdown("### ✉️ Create an invite")
@@ -1071,6 +1141,6 @@ elif st.session_state.active_tab == "Admin":
 st.divider()
 st.markdown(
     "<div style='text-align: center; color: #71717a; font-size: 12px; padding: 8px 0;'>"
-    "Monopoly GO! Sticker Share · v3.1.1</div>",
+    "Monopoly GO! Sticker Share · v3.2.0</div>",
     unsafe_allow_html=True,
 )

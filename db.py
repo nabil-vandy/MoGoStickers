@@ -123,6 +123,13 @@ def set_screenname(profile_id, screenname):
     return (res is not None), (None if res is not None else "Screenname taken or invalid")
 
 
+def mark_changelog_seen(profile_id, changelog_id):
+    """Record the newest changelog the user has acknowledged. Fail-soft: if the
+    `last_seen_changelog` column doesn't exist yet (migration 004 not run), the
+    PATCH just errors out harmlessly and the popup reappears next load."""
+    return update_profile(profile_id, last_seen_changelog=changelog_id)
+
+
 # --- Invites ----------------------------------------------------------------
 def create_invite(code, screenname, email=None, emoji="👤", color="#93c5fd",
                   is_admin=False, auto_approve=True):
