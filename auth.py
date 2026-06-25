@@ -12,6 +12,8 @@ Google email is matched to a row in the `profiles` table:
   * known but not approved                 -> "pending approval" screen
   * known and approved                     -> returned as the current user
 """
+import os
+
 import streamlit as st
 
 import db
@@ -19,6 +21,18 @@ import db
 
 def require_auth():
     """Gate the app. Returns the approved current-user profile dict, or st.stop()s."""
+    # Dev/preview auto-login: if MOGO_DEV_EMAIL is set (local secrets.toml only —
+    # never in Streamlit Cloud), skip Google OIDC and load that real profile. This
+    # lets the sandboxed Claude preview, which can't complete the OAuth redirect,
+    # run the full app as a real user. Absent in production, so login is unchanged.
+    dev_email = os.getenv("MOGO_DEV_EMAIL")
+    if dev_email and not (getattr(st, "user", None) and st.user.is_logged_in):
+        profile = db.get_profile_by_email(dev_email.strip())
+        if profile:
+            st.session_state["_dev_login"] = True
+            return profile
+        # Email isn't a real profile — fall through to the normal Google flow.
+
     if not getattr(st, "user", None) or not st.user.is_logged_in:
         _render_login()
         st.stop()

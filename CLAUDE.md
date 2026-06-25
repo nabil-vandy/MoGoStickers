@@ -13,26 +13,27 @@ make run      # streamlit run app.py (uses .venv/bin/python if present)
 python -m py_compile app.py db.py auth.py gemini.py
 ```
 
-**Preview** (Claude Code desktop): uses `.claude/launch.json` + a launcher that copies app files to `/tmp/mogostickers/` and monkey-patches syscalls blocked by the preview sandbox (`os.getcwd()`, file access to `~/Documents`). After editing source files, resync the copy before reloading the preview:
+**Preview** (Claude Code desktop): uses `.claude/launch.json` + a launcher that copies app files to `/tmp/mogostickers/` and monkey-patches syscalls blocked by the preview sandbox (`os.getcwd()`, file access to `~/Documents`). After editing source files, resync **all five** Python files before reloading the preview (a missing file — e.g. `changelog.py` — crashes the app on import):
 
 ```bash
 cp app.py db.py auth.py gemini.py changelog.py /tmp/mogostickers/
 ```
 
-Note: the Claude preview cannot complete Google OIDC login (sandbox blocks the OAuth redirect). Use the live site at https://mogostickers.streamlit.app/ for end-to-end auth testing.
+**Login in the preview**: the sandbox can't complete the Google OAuth redirect, so the preview uses a dev auto-login. Set `MOGO_DEV_EMAIL` (a top-level key in the **local** `.streamlit/secrets.toml`, also present in the `/tmp/mogostickers/.streamlit/secrets.toml` copy) to a real, approved member's email. `auth.require_auth()` reads it via `os.getenv`, skips `st.login`, and loads that profile directly; a 🧪 banner shows in-app. **Never** add `MOGO_DEV_EMAIL` to Streamlit Cloud's secrets — it's the entire security boundary, so production (where the key is absent) always requires real Google login. To test the *real* Google flow end-to-end, use the live site at https://mogostickers.streamlit.app/.
 
 ## Architecture
 
-Four Python files; no framework besides Streamlit.
+Five Python files; no framework besides Streamlit.
 
 | File | Role |
 |------|------|
 | `app.py` | All UI (tabs, widgets, event handlers). Auth gate runs at the top, then the full page renders per `st.session_state.active_tab`. |
 | `db.py` | Supabase REST + Storage calls via `urllib`. No ORM. Uses the **service-role key** (bypasses RLS). |
-| `auth.py` | Streamlit-native OIDC gate (`st.login`/`st.user`/`st.logout`). Handles invite-claiming and pending-approval screens. |
+| `auth.py` | Streamlit-native OIDC gate (`st.login`/`st.user`/`st.logout`). Handles invite-claiming and pending-approval screens. Also honors the `MOGO_DEV_EMAIL` preview auto-login (see Preview, above). |
 | `gemini.py` | Screenshot analysis: crop → send image + reference JSON → Pydantic schema → name matching (`difflib`). |
+| `changelog.py` | Newest-first release list that drives the "What's new" popup (the only reliable source — Streamlit Cloud has no git). |
 
-`app.py` imports `auth`, `db`, `gemini`; the other three are self-contained.
+`app.py` imports `auth`, `db`, `gemini`, `changelog`; the other four are self-contained.
 
 ### Navigation & page flow
 
@@ -76,13 +77,13 @@ Albums are numbered 1–N by their lowest sticker id (`set_number_by_album` dict
 
 **Ownership** is `(user_id uuid, sticker_id bigint, owned bool, extras int)` with `UNIQUE(user_id, sticker_id)`. `owned` = has the sticker; `extras` = the in-game "+N" badge. Total = `db.total_for(owned, extras)` = `(1 + extras) if owned else 0`. Never store or derive a raw total.
 
-**Profiles** hold `(id, email, screenname, emoji, color, is_admin, approved)`. The `screenname` is the sole display identity across all UI — email is only for login matching, never shown. Screennames are managed by admins via the Admin tab; there is no self-serve rename for regular users.
+**Profiles** hold `(id, email, screenname, real_name, emoji, color, is_admin, approved, last_seen_changelog)`. The `screenname` is the sole display identity across all UI — email is only for login matching, and `real_name` is stored (migration 001, set when claiming an invite) but **never shown** in the UI. Screennames are managed by admins via the Admin tab; there is no self-serve rename for regular users. `last_seen_changelog` (migration 004) tracks which release the user has dismissed in the "What's new" popup.
 
 **Upload flow**: analyze → store raw JSON in `uploads.raw_response` + per-sticker rows in `upload_items` → show `st.data_editor` review panel (changed rows only) → only write `ownership` on Confirm. Never write on analyze.
 
 **Database tables**: `stickers`, `profiles`, `invites`, `ownership`, `uploads`, `upload_items`, `database_history`. Screenshots persist in the private Supabase Storage bucket `screenshots/`.
 
-`database_history`: every ownership-mutating action (trades, manual edits, upload commits) first calls `db.log_history(...)` to snapshot state. The user-facing History & Rollbacks UI was removed in v3.0.2, so `db.fetch_history()` / `db.apply_rollback()` still exist but are currently unreferenced.
+`database_history`: every ownership-mutating action (trades, manual edits, upload commits) first calls `db.log_history(...)` to snapshot state (via `db.snapshot_ownership(...)`). The user-facing History & Rollbacks UI was removed in v3.0.2; the now-unused `db.fetch_history()` / `db.apply_rollback()` helpers were dropped in the v3.2.0 cleanup, so the table is write-only today (kept for audit/manual recovery).
 
 `ownership_legacy` still exists in the DB (renamed from `ownership` during migration 001). Drop it only after verifying sticker totals in the live app, then run `migrations/002_drop_legacy.sql`.
 

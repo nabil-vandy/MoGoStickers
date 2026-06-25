@@ -7,7 +7,7 @@ setup:
 	$(PYTHON) -m pip install -r requirements.txt
 
 syntax:
-	$(PYTHON) -B -c 'source = open("app.py").read(); compile(source, "app.py", "exec")'
+	$(PYTHON) -m py_compile app.py db.py auth.py gemini.py changelog.py
 
 run:
 	$(PYTHON) -m streamlit run app.py

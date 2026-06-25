@@ -444,6 +444,17 @@ if impersonating:
         unsafe_allow_html=True,
     )
 
+# Dev/preview auto-login banner (set by auth.require_auth when MOGO_DEV_EMAIL is used).
+if st.session_state.get("_dev_login"):
+    st.markdown(
+        "<div style='background-color: rgba(234,179,8,0.10); border:1px solid rgba(234,179,8,0.35);"
+        "border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:13px; color:#fde047;'>"
+        "🧪 <b>DEV PREVIEW</b> — auto-logged-in via MOGO_DEV_EMAIL (Google login skipped). "
+        "<span style='color:#71717a;'>Edits write to the LIVE database.</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
 # --- Welcome-back changelog popup (keyed to the real logged-in user) ---------
 # Gate on the column existing: PostgREST `select=*` only returns the key once
 # migration 004 has run, so the feature stays fully dormant (no popup, no writes,
@@ -909,15 +920,36 @@ elif st.session_state.active_tab == "Upload":
                         st.caption("(image unavailable)")
             with col_tbl:
                 sticker_name = {s["id"]: s["name"] for s in stickers}
-                table = [{
-                    "Detected": it["detected_name"],
-                    "Matched": sticker_name.get(it["matched_sticker_id"], "— unmatched —"),
-                    "How": it["match_method"],
-                    "Owned": it["new_owned"],
-                    "+N": it["new_extras"],
-                    "Was": f"{'own' if it['previous_owned'] else '—'} +{it['previous_extras'] or 0}",
-                } for it in items]
-                st.dataframe(table, use_container_width=True, hide_index=True)
+                html_rows = []
+                for it in items:
+                    new_label = f"{'own' if it['new_owned'] else '—'} +{it['new_extras'] or 0}"
+                    was_label = f"{'own' if it['previous_owned'] else '—'} +{it['previous_extras'] or 0}"
+                    changed = new_label != was_label
+                    row_style = ' style="color:#4ade80;"' if changed else ""
+                    new_cell = f"{'↑ ' if changed else ''}{new_label}"
+                    html_rows.append(
+                        f"<tr{row_style}>"
+                        f"<td style='padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);vertical-align:middle;'>{it['detected_name']}</td>"
+                        f"<td style='padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);vertical-align:middle;'>{sticker_name.get(it['matched_sticker_id'], '— unmatched —')}</td>"
+                        f"<td style='padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);vertical-align:middle;'>{it['match_method']}</td>"
+                        f"<td style='padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);vertical-align:middle;font-weight:{'700' if changed else '400'};'>{new_cell}</td>"
+                        f"<td style='padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);vertical-align:middle;'>{was_label}</td>"
+                        f"</tr>"
+                    )
+                th = "padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.1);text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#71717a;"
+                st.markdown(
+                    f"""<table style='width:100%;border-collapse:collapse;font-size:13px;'>
+                      <thead><tr>
+                        <th style='{th}'>Detected</th>
+                        <th style='{th}'>Matched</th>
+                        <th style='{th}'>Precision</th>
+                        <th style='{th}'>New</th>
+                        <th style='{th}'>Was</th>
+                      </tr></thead>
+                      <tbody>{"".join(html_rows)}</tbody>
+                    </table>""",
+                    unsafe_allow_html=True,
+                )
 
             with st.expander("🔬 Raw Gemini response (why the count was chosen)"):
                 st.json(upload.get("raw_response") or {})

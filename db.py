@@ -218,24 +218,6 @@ def log_history(user_id, action, snapshot):
     })
 
 
-def fetch_history(limit=10):
-    return _request(f"database_history?select=*&order=created_at.desc&limit={limit}") or []
-
-
-def apply_rollback(snapshot):
-    """Snapshot is a list of {user_id, sticker_id, owned, extras}.
-    Pre-migration snapshots (legacy hana/jon/nabil format) are skipped."""
-    _invalidate_sticker_cache()
-    applied = 0
-    for item in snapshot or []:
-        if "user_id" in item and "sticker_id" in item:
-            upsert_ownership(item["user_id"], item["sticker_id"],
-                             item.get("owned", False), item.get("extras", 0))
-            applied += 1
-    if applied == 0 and snapshot:
-        st.warning("This history entry predates the schema migration and can't be rolled back.")
-
-
 def snapshot_ownership(stickers, pool):
     """Capture current owned/extras for every (user, sticker) for history/rollback."""
     snap = []
