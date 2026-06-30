@@ -206,6 +206,30 @@ st.markdown("""
         padding-top: 1.5rem !important;
         padding-bottom: 1.5rem !important;
     }
+
+    /* Highlight Confirm button in bright green */
+    .st-key-confirm_save_btn button {
+        background-color: #22c55e !important;
+        color: #ffffff !important;
+        border-color: #22c55e !important;
+        font-weight: 600 !important;
+    }
+    .st-key-confirm_save_btn button:hover {
+        background-color: #16a34a !important;
+        border-color: #16a34a !important;
+        color: #ffffff !important;
+    }
+    .st-key-confirm_save_btn button:active {
+        background-color: #15803d !important;
+        border-color: #15803d !important;
+        color: #ffffff !important;
+    }
+    .st-key-confirm_save_btn button:disabled {
+        background-color: rgba(34, 197, 94, 0.3) !important;
+        color: rgba(255, 255, 255, 0.4) !important;
+        border-color: transparent !important;
+        cursor: not-allowed !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -370,7 +394,7 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.3.0</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.3.1</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -742,93 +766,94 @@ elif st.session_state.active_tab == "Upload":
             st.markdown(" ".join(chips_html), unsafe_allow_html=True)
         st.markdown("<div style='margin-bottom:16px;'></div>", unsafe_allow_html=True)
 
-        st.markdown("### 📸 Upload & Analyze")
-        st.write("Upload album page screenshots. They're analyzed and shown for review — "
-                 "**nothing is saved until you confirm.**")
+        if not st.session_state.pending_review:
+            st.markdown("### 📸 Upload & Analyze")
+            st.write("Upload album page screenshots. They're analyzed and shown for review — "
+                     "**nothing is saved until you confirm.**")
 
-        if not gemini.GEMINI_API_KEY:
-            st.error("GEMINI_API_KEY is not set. Configure it to analyze screenshots.")
-        else:
-            uploaded_files = st.file_uploader("Select screenshots",
-                                              type=["png", "jpg", "jpeg"],
-                                              accept_multiple_files=True)
-            if uploaded_files and st.button("Analyze (no changes yet)", type="primary",
-                                            use_container_width=True):
-                progress = st.progress(0)
-                status = st.empty()
+            if not gemini.GEMINI_API_KEY:
+                st.error("GEMINI_API_KEY is not set. Configure it to analyze screenshots.")
+            else:
+                uploaded_files = st.file_uploader("Select screenshots",
+                                                  type=["png", "jpg", "jpeg"],
+                                                  accept_multiple_files=True)
+                if uploaded_files and st.button("Analyze (no changes yet)", type="primary",
+                                                use_container_width=True):
+                    progress = st.progress(0)
+                    status = st.empty()
 
-                # Read bytes on the main thread (file handles aren't thread-safe),
-                # then crop + upload + analyze each file concurrently.
-                jobs = []
-                for file in uploaded_files:
-                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    jobs.append({
-                        "name": file.name, "type": file.type,
-                        "bytes": file.read(),
-                        "path": f"{my_id}/{ts}_{file.name}",
-                    })
-
-                def process(job):
-                    """Crop → store → Gemini → match. Pure of st.session_state."""
-                    img_bytes, mime = gemini.crop_screenshot(job["bytes"], job["type"])
-                    stored = db.upload_screenshot(job["path"], img_bytes, mime or job["type"])
-                    raw, detected = gemini.analyze(img_bytes, mime or job["type"], stickers)
-                    upload = db.create_upload(my_id, stored, job["name"], gemini.MODEL_NAME, raw)
-                    rows, items_payload = [], []
-                    for d in detected:
-                        match_sticker, method = gemini.match(d["name"], stickers)
-                        prev = db.ownership_for(match_sticker, my_id) if match_sticker else {"owned": False, "extras": 0}
-                        rows.append({
-                            "upload_id": upload["id"] if upload else None,
-                            "image_path": stored,
-                            "detected_name": d["name"],
-                            "detected_owned": d["owned"],
-                            "detected_extras": d["extras"],
-                            "matched_sticker_id": match_sticker["id"] if match_sticker else None,
-                            "matched_name": match_sticker["name"] if match_sticker else None,
-                            "match_method": method,
-                            "prev_owned": prev["owned"],
-                            "prev_extras": prev["extras"],
-                            "new_owned": d["owned"] if match_sticker else None,
-                            "new_extras": d["extras"] if match_sticker else None,
+                    # Read bytes on the main thread (file handles aren't thread-safe),
+                    # then crop + upload + analyze each file concurrently.
+                    jobs = []
+                    for file in uploaded_files:
+                        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        jobs.append({
+                            "name": file.name, "type": file.type,
+                            "bytes": file.read(),
+                            "path": f"{my_id}/{ts}_{file.name}",
                         })
-                        items_payload.append({
-                            "upload_id": upload["id"] if upload else None,
-                            "detected_name": d["name"], "detected_owned": d["owned"],
-                            "detected_extras": d["extras"],
-                            "matched_sticker_id": match_sticker["id"] if match_sticker else None,
-                            "match_method": method,
-                            "previous_owned": prev["owned"], "previous_extras": prev["extras"],
-                            "new_owned": d["owned"] if match_sticker else None,
-                            "new_extras": d["extras"] if match_sticker else None,
-                            "applied": False,
-                        })
-                    db.add_upload_items(items_payload)
-                    return rows
 
-                review_rows = []
-                ctx = get_script_run_ctx()
-                done = 0
-                total = len(jobs)
-                status.write(f"Analyzing {total} screenshot(s)…")
-                # initializer attaches the Streamlit context to each pool thread
-                # so db._request's st.error stays valid if a call fails.
-                with ThreadPoolExecutor(max_workers=min(total, 8),
-                                        initializer=add_script_run_ctx,
-                                        initargs=(None, ctx)) as ex:
-                    futures = {ex.submit(process, job): job["name"] for job in jobs}
-                    for fut in as_completed(futures):
-                        try:
-                            review_rows.extend(fut.result())
-                        except Exception as e:
-                            st.error(f"Error analyzing {futures[fut]}: {e}")
-                        done += 1
-                        progress.progress(int((done / total) * 100))
-                        status.write(f"Analyzed {done} of {total}…")
+                    def process(job):
+                        """Crop → store → Gemini → match. Pure of st.session_state."""
+                        img_bytes, mime = gemini.crop_screenshot(job["bytes"], job["type"])
+                        stored = db.upload_screenshot(job["path"], img_bytes, mime or job["type"])
+                        raw, detected = gemini.analyze(img_bytes, mime or job["type"], stickers)
+                        upload = db.create_upload(my_id, stored, job["name"], gemini.MODEL_NAME, raw)
+                        rows, items_payload = [], []
+                        for d in detected:
+                            match_sticker, method = gemini.match(d["name"], stickers)
+                            prev = db.ownership_for(match_sticker, my_id) if match_sticker else {"owned": False, "extras": 0}
+                            rows.append({
+                                "upload_id": upload["id"] if upload else None,
+                                "image_path": stored,
+                                "detected_name": d["name"],
+                                "detected_owned": d["owned"],
+                                "detected_extras": d["extras"],
+                                "matched_sticker_id": match_sticker["id"] if match_sticker else None,
+                                "matched_name": match_sticker["name"] if match_sticker else None,
+                                "match_method": method,
+                                "prev_owned": prev["owned"],
+                                "prev_extras": prev["extras"],
+                                "new_owned": d["owned"] if match_sticker else None,
+                                "new_extras": d["extras"] if match_sticker else None,
+                            })
+                            items_payload.append({
+                                "upload_id": upload["id"] if upload else None,
+                                "detected_name": d["name"], "detected_owned": d["owned"],
+                                "detected_extras": d["extras"],
+                                "matched_sticker_id": match_sticker["id"] if match_sticker else None,
+                                "match_method": method,
+                                "previous_owned": prev["owned"], "previous_extras": prev["extras"],
+                                "new_owned": d["owned"] if match_sticker else None,
+                                "new_extras": d["extras"] if match_sticker else None,
+                                "applied": False,
+                            })
+                        db.add_upload_items(items_payload)
+                        return rows
 
-                st.session_state.pending_review = review_rows
-                status.write("Analysis complete — review below.")
-                st.rerun()
+                    review_rows = []
+                    ctx = get_script_run_ctx()
+                    done = 0
+                    total = len(jobs)
+                    status.write(f"Analyzing {total} screenshot(s)…")
+                    # initializer attaches the Streamlit context to each pool thread
+                    # so db._request's st.error stays valid if a call fails.
+                    with ThreadPoolExecutor(max_workers=min(total, 8),
+                                            initializer=add_script_run_ctx,
+                                            initargs=(None, ctx)) as ex:
+                        futures = {ex.submit(process, job): job["name"] for job in jobs}
+                        for fut in as_completed(futures):
+                            try:
+                                review_rows.extend(fut.result())
+                            except Exception as e:
+                                st.error(f"Error analyzing {futures[fut]}: {e}")
+                            done += 1
+                            progress.progress(int((done / total) * 100))
+                            status.write(f"Analyzed {done} of {total}…")
+
+                    st.session_state.pending_review = review_rows
+                    status.write("Analysis complete — review below.")
+                    st.rerun()
 
         # Review-before-commit panel
         if st.session_state.pending_review:
@@ -881,7 +906,7 @@ elif st.session_state.active_tab == "Upload":
             col_a, col_b = st.columns([1, 1])
             with col_a:
                 if st.button("✅ Confirm & Save", type="primary", use_container_width=True,
-                             disabled=not matched):
+                             disabled=not matched, key="confirm_save_btn"):
                     db.log_history(my_id, "Applied screenshot upload",
                                    db.snapshot_ownership(stickers, pool))
                     # Dedupe by sticker (last edit wins) — a single bulk upsert can't
@@ -1187,6 +1212,6 @@ elif st.session_state.active_tab == "Admin":
 st.divider()
 st.markdown(
     "<div style='text-align: center; color: #71717a; font-size: 12px; padding: 8px 0;'>"
-    "Monopoly GO! Sticker Share · v3.3.0</div>",
+    "Monopoly GO! Sticker Share · v3.3.1</div>",
     unsafe_allow_html=True,
 )

@@ -15,6 +15,17 @@ all unseen entries are shown together as a single combined set.
 # Newest first. Bump this list (and app version) when shipping user-facing changes.
 CHANGELOG = [
     {
+        "id": "3.3.1",
+        "version": "3.3.1",
+        "date": "2026-06-30",
+        "changes": [
+            "Hides the screenshot uploader and Analyze button after triggering "
+            "analysis, making the next steps (Review & Confirm) clear and uncluttered.",
+            "Highlights the Confirm & Save button in bright green to make the final "
+            "confirmation action easy to find.",
+        ],
+    },
+    {
         "id": "3.3.0",
         "version": "3.3.0",
         "date": "2026-06-24",
