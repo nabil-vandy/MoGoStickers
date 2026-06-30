@@ -387,6 +387,32 @@ def group_sets_needing_upload(stickers, pool):
     return sorted(needed)
 
 
+def format_set_list(sets):
+    """Format a list of sorted integers into a range string, e.g. [9, 10, 11, 15] -> '9–11, 15'"""
+    if not sets:
+        return ""
+    ranges = []
+    start = None
+    end = None
+    for n in sorted(sets):
+        if start is None:
+            start = end = n
+        elif n == end + 1:
+            end = n
+        else:
+            if start == end:
+                ranges.append(str(start))
+            else:
+                ranges.append(f"{start}–{end}")
+            start = end = n
+    if start is not None:
+        if start == end:
+            ranges.append(str(start))
+        else:
+            ranges.append(f"{start}–{end}")
+    return ", ".join(ranges)
+
+
 # --- Sidebar Layout ---
 with st.sidebar:
     st.markdown("""
@@ -394,7 +420,7 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.3.1</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.3.2</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -745,8 +771,9 @@ elif st.session_state.active_tab == "Upload":
                     f"border-radius:12px;padding:4px 10px;margin:3px;font-size:12px;'>"
                     f"{tag}Set {num} · {emoji} {album}</span>")
 
-        if threshold is not None:
-            st.markdown(f"### 📋 Upload all Sets {threshold}–{REGULAR_SET_MAX} + the current Bonus Set")
+        if needed_sets:
+            formatted = format_set_list(needed_sets)
+            st.markdown(f"### 📋 Upload needed Sets {formatted} + the current Bonus Set")
         elif current_bonus_album:
             st.markdown("### 📋 Upload the current Bonus Set")
         else:
@@ -755,8 +782,8 @@ elif st.session_state.active_tab == "Upload":
                    "Your updated extras are what others need to finish their albums.")
 
         chips_html = []
-        if threshold is not None:
-            for n in range(threshold, REGULAR_SET_MAX + 1):
+        if needed_sets:
+            for n in needed_sets:
                 a = album_by_set_number.get(n)
                 if a:
                     chips_html.append(_chip(n, a))
@@ -1212,6 +1239,6 @@ elif st.session_state.active_tab == "Admin":
 st.divider()
 st.markdown(
     "<div style='text-align: center; color: #71717a; font-size: 12px; padding: 8px 0;'>"
-    "Monopoly GO! Sticker Share · v3.3.1</div>",
+    "Monopoly GO! Sticker Share · v3.3.2</div>",
     unsafe_allow_html=True,
 )

@@ -10,3 +10,4 @@ screenshots/
 
 # Local DB/code save points (large, may contain data dumps)
 backups/
+output/

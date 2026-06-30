@@ -15,6 +15,16 @@ all unseen entries are shown together as a single combined set.
 # Newest first. Bump this list (and app version) when shipping user-facing changes.
 CHANGELOG = [
     {
+        "id": "3.3.2",
+        "version": "3.3.2",
+        "date": "2026-06-30",
+        "changes": [
+            "Dynamically hides completed regular sets from the upload screenshots guidance, "
+            "so users only see sets they actually need to capture.",
+            "Integrates and automates sticker sync to Supabase when new sticker sets are added.",
+        ],
+    },
+    {
         "id": "3.3.1",
         "version": "3.3.1",
         "date": "2026-06-30",
