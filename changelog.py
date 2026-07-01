@@ -15,6 +15,15 @@ all unseen entries are shown together as a single combined set.
 # Newest first. Bump this list (and app version) when shipping user-facing changes.
 CHANGELOG = [
     {
+        "id": "3.3.3",
+        "version": "3.3.3",
+        "date": "2026-06-30",
+        "changes": [
+            "Bypasses the Android Chrome photo picker bug by removing the restrictive file-extension filter on uploads.",
+            "Validates file formats in Python, adding support for uploading WebP screenshots.",
+        ],
+    },
+    {
         "id": "3.3.2",
         "version": "3.3.2",
         "date": "2026-06-30",

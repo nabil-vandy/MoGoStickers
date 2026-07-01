@@ -420,7 +420,7 @@ with st.sidebar:
         <div style='font-size: 24px; font-weight: 800; color: #f4f4f5; display: flex; align-items: center; gap: 10px;'>
             <span>🎲</span> Monopoly GO!
         </div>
-        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.3.2</span></div>
+        <div style='font-size: 14px; color: #3b82f6; font-weight: 600; margin-top: -4px; margin-left: 34px;'>Sticker Share <span style='color: #71717a; font-size: 0.85em; font-weight: normal; margin-left: 4px;'>v3.3.3</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -802,9 +802,20 @@ elif st.session_state.active_tab == "Upload":
                 st.error("GEMINI_API_KEY is not set. Configure it to analyze screenshots.")
             else:
                 uploaded_files = st.file_uploader("Select screenshots",
-                                                  type=["png", "jpg", "jpeg"],
                                                   accept_multiple_files=True)
-                if uploaded_files and st.button("Analyze (no changes yet)", type="primary",
+                valid_files = []
+                invalid_files = []
+                if uploaded_files:
+                    allowed_exts = (".png", ".jpg", ".jpeg", ".webp")
+                    for file in uploaded_files:
+                        if file.name.lower().endswith(allowed_exts):
+                            valid_files.append(file)
+                        else:
+                            invalid_files.append(file.name)
+                    if invalid_files:
+                        st.error(f"Unsupported file format(s): {', '.join(invalid_files)}. "
+                                 "Please upload only PNG, JPG, JPEG, or WEBP images.")
+                if valid_files and st.button("Analyze (no changes yet)", type="primary",
                                                 use_container_width=True):
                     progress = st.progress(0)
                     status = st.empty()
@@ -812,7 +823,7 @@ elif st.session_state.active_tab == "Upload":
                     # Read bytes on the main thread (file handles aren't thread-safe),
                     # then crop + upload + analyze each file concurrently.
                     jobs = []
-                    for file in uploaded_files:
+                    for file in valid_files:
                         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                         jobs.append({
                             "name": file.name, "type": file.type,

@@ -56,7 +56,10 @@ def crop_screenshot(image_bytes, mime_type=None, top=0.09, bottom=0.15):
             cropped = cropped.convert("RGB")
         buf = io.BytesIO()
         cropped.save(buf, format=fmt)
-        out_mime = "image/png" if fmt == "PNG" else "image/jpeg"
+        fmt_lower = fmt.lower()
+        if fmt_lower == "jpg":
+            fmt_lower = "jpeg"
+        out_mime = f"image/{fmt_lower}"
         return buf.getvalue(), out_mime
     except Exception:
         return image_bytes, mime_type
